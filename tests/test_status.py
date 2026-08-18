@@ -58,17 +58,24 @@ def test_transition_table_is_read_only() -> None:
 # ── 终态 / 冻结态 ─────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    "st", ["evaluated", "eval_failed", "rejected", "superseded"]
-)
+@pytest.mark.parametrize("st", ["evaluated", "eval_failed", "rejected", "superseded"])
 def test_terminal_states_have_no_outgoing_edges(st: str) -> None:
     """spec 不变量 7：单向，不许回退。"""
     assert S.is_terminal(st)
     assert S.STATUS_TRANSITIONS[st] == frozenset()
 
 
-@pytest.mark.parametrize("st", ["received", "burn_checking", "burn_passed",
-                                "pending", "seed_failed", "evaluating"])
+@pytest.mark.parametrize(
+    "st",
+    [
+        "received",
+        "burn_checking",
+        "burn_passed",
+        "pending",
+        "seed_failed",
+        "evaluating",
+    ],
+)
 def test_non_terminal_states(st: str) -> None:
     assert not S.is_terminal(st)
 

@@ -290,6 +290,47 @@ class ErrorEnvelope(Contract):
     meta: Meta
 
 
+class ValidationErrorBody(ErrorBody):
+    """422 专用：比 `ErrorBody` 多且只多一个 `fields`，且**必填**。
+
+    ADR 02 §8 未决问题 ② 的落地形状（2026-08-18）。那条问题是：
+    `detail` 今天是 `[{loc, msg, type}, …]` 一个列表，而 `ErrorBody.message` 是
+    一个字符串，逐字段错误没有位置。两个候选是「加可选字段」和「合并成一行文本」。
+
+    选了加字段，但**不是 `fields: … | None = None`** —— 那要求每个路由记得写
+    `response_model_exclude_none=True`，漏一个就多吐 `"fields": null`，
+    而忘一次是静默的（同一个理由让 `meta.page` 也走了子类，见 `ListMeta`）。
+    走子类的话「422 忘了带逐字段信息」在类型层就构造不出来，其余错误码则
+    连这个键都不会出现，`ErrorBody` 的已定案形状一个字节没动。
+
+    没选「合并成一行文本」：422 是全部错误码里**唯一以结构为内容**的那个，
+    把结构拍平成散文，等于在最需要机器可读的地方丢掉机器可读性。
+
+    ⚠️ `fields` 里**只有 `loc` / `msg` / `type`，没有 `input`**。pydantic 默认会把
+    收到的值放进 `input`：worker 发来 `NaN`（Python 的 `json.dumps` 默认就输出这个
+    字面量）时那个字段序列化不了，于是「干净的 422」变成未捕获异常 + 500，
+    发错数据的人看不到任何原因；而且提交体里有 hotkey 和完整评测结果，
+    回显等于把 payload 抄进日志和响应。
+    """
+
+    #: `[{"loc": "body.env_scores", "msg": "…", "type": "missing"}, …]`
+    #:
+    #: ⚠️ 与裸形状的 `detail` **有一处不同**：那边 `loc` 是数组
+    #: `["body", "env_scores"]`，这里拼成点号路径。信息量相同，
+    #: 但拿到就能直接显示，而且整个 `fields` 的类型收得住（全是字符串）——
+    #: 数组那种写法的类型是 `dict[str, list[str] | str]`，
+    #: 每个消费方都得为一个键写一次窄化。
+    #: 两边的差异只有这一处，迁移说明 §2 里逐条列了。
+    fields: list[dict[str, str]]
+
+
+class ValidationErrorEnvelope(Contract):
+    """422 的错误响应。`error` 是 `ValidationErrorBody`，其余与 `ErrorEnvelope` 同。"""
+
+    error: ValidationErrorBody
+    meta: Meta
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 时间与共用片段
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1527,6 +1568,8 @@ __all__ = [
     "SubmissionHistoryResponse",
     "SubmissionRecord",
     "TasksPassed",
+    "ValidationErrorBody",
+    "ValidationErrorEnvelope",
     "Weights",
     "check_env_scores",
     "check_required_envs",

@@ -46,6 +46,8 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.ListEnvelope: {"data", "meta"},
     s.ErrorEnvelope: {"error", "meta"},
     s.ErrorBody: {"code", "message", "retryable"},
+    s.ValidationErrorEnvelope: {"error", "meta"},
+    s.ValidationErrorBody: {"code", "message", "retryable", "fields"},
     s.Meta: {"request_id", "generated_at"},
     s.ListMeta: {"request_id", "generated_at", "page"},
     s.PageMeta: {"total", "limit", "offset", "has_more"},
@@ -1106,6 +1108,46 @@ def test_error_response_always_has_error_and_never_data() -> None:
 
     with pytest.raises(ValidationError):
         s.ErrorBody(code="INFRA_ERROR", message="chain rpc down")  # type: ignore[call-arg]
+
+
+def test_only_validation_errors_carry_fields() -> None:
+    """`fields` **只在 422 的那个子类上**，普通错误连这个键都不出现。
+
+    ADR 02 §8 未决问题 ② 的落地形状（2026-08-18）。走子类而不是
+    `fields: … | None = None`：可选字段要靠每个出口记得 `exclude_none`，
+    漏一个就多吐 `"fields": null`，而忘一次是静默的 —— 和 `meta.page` 走
+    `ListMeta` 子类是同一个理由。
+
+    这条同时钉住**基类没被顺手改**：`ValidationErrorBody` 继承 `ErrorBody`，
+    下面那个键集断言是继承展开后的，基类少一个字段这里就红。
+    """
+    plain = s.ErrorEnvelope(
+        error=s.ErrorBody(code="NOT_FOUND", message="no", retryable=False),
+        meta=_meta(),
+    ).model_dump(mode="json")
+    assert "fields" not in plain["error"]
+
+    invalid = s.ValidationErrorEnvelope(
+        error=s.ValidationErrorBody(
+            code="VALIDATION_ERROR",
+            message="请求体校验失败（1 个字段）",
+            retryable=False,
+            fields=[
+                {"loc": "body.env_scores", "msg": "field required", "type": "missing"}
+            ],
+        ),
+        meta=_meta(),
+    ).model_dump(mode="json")
+    assert set(invalid) == {"error", "meta"}
+    assert "data" not in invalid
+    assert invalid["error"]["fields"][0]["loc"] == "body.env_scores"
+
+    # `fields` 必填 —— 忘了带的 422 构造不出来，而「422 没有逐字段信息」
+    # 正是这个子类存在的全部理由。
+    with pytest.raises(ValidationError):
+        s.ValidationErrorBody(  # type: ignore[call-arg]
+            code="VALIDATION_ERROR", message="x", retryable=False
+        )
 
 
 def test_request_id_is_on_every_response_including_errors() -> None:
