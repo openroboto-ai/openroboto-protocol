@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 工具产物。这个仓还没有第一个 commit，而 `.coverage`（53 KB sqlite）、
+# `.mypy_cache/`（几 MB）此刻都已经躺在工作区里 —— 不写进来，它们会跟着
+# 第一个 commit 一起进历史，之后再删也删不掉。
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

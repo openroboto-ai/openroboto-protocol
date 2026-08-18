@@ -1,0 +1,221 @@
+name: CI
+
+# 单分支：main 是唯一长期分支，功能走 PR。直推 main 也跑一遍 ——
+# 只在 PR 上触发的话，直推的改动一次检查都不会过。
+# tag 也跑：v1.0.0 打上去之前，构建产物必须先被验证过一次。
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 只有一处版本号，三个 job 共用 —— 分开写迟早漏掉一个，
+  # 于是同一次 CI 里两个 job 用不同的 uv 解析出不同的依赖树。
+  # 升版本前先确认 astral-sh/setup-uv 知道它的 checksum：
+  # https://github.com/astral-sh/setup-uv/issues/851#issuecomment-4282017837
+  UV_VERSION: "0.11.18"
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 黄金向量单独成 job，名字就是它的语义。
+  #
+  # 别的 job 红了是"代码写错了"，这个 job 红了是**有人改了已经发生在链上的历史** ——
+  # 那段历史决定了谁拿到排放。两者的处理方式完全不同（一个是修代码，一个是停下来
+  # 说明为什么要改写过去），所以在 PR 的检查列表里必须一眼分得开，不能混在
+  # "tests" 里当一条普通用例。
+  #
+  # 跑在 .python-version（3.11）上，因为矿工侧就是 3.11 —— 复现历史用的解释器
+  # 应当是产生历史的那一个。
+  # ───────────────────────────────────────────────────────────────────────────
+  golden-vectors:
+    name: golden vectors (RED = on-chain history was rewritten)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      # --locked：依赖变了却没更新 uv.lock 时当场失败，而不是让 CI 自己
+      # 悄悄重新解析一遍 —— 那样 CI 装的和发版机器装的就不是同一套。
+      - run: uv sync --locked
+
+      # 用 glob 而不是列文件名：新增一个 test_*golden_vectors.py 会自动被带上。
+      # 而如果有人把文件改名跑出这个约定，glob 匹配不到、pytest 直接报用法错误 ——
+      # 是显式失败，不是静默跳过。同理 GOLDEN_SEEDS 被清空的话 pytest 会以
+      # "no tests collected"(exit 5) 退出，也红。这个 job 没有"空转变绿"的路径。
+      - name: Golden vectors
+        run: uv run pytest tests/test_*golden_vectors.py -q
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 3.11 和 3.12 都必须过：矿工侧与评测机是 3.11（openroboto-subnet 的 Dockerfile
+  # 写死 python3.11），backend 是 3.12。这个包同时装进两边，只在一边验证等于
+  # 把兼容性问题留给矿工在装包时发现。
+  # ───────────────────────────────────────────────────────────────────────────
+  ci:
+    name: lint + tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # 一边挂不掩盖另一边的结果 —— 需要知道是两边都坏了还是只坏一边。
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      # UV_PYTHON 优先级高于 .python-version，让 uv 自己管解释器，
+      # 不用 setup-python —— 否则 setup-python 装 3.12、uv 读 .python-version
+      # 又去下 3.11，矩阵形同虚设。
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      # --locked：依赖变了却没更新 uv.lock 时当场失败，而不是让 CI 自己
+      # 悄悄重新解析一遍 —— 那样 CI 装的和发版机器装的就不是同一套。
+      - run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # 只查 src：tests/ 里为了构造非法输入会故意传错类型，strict 下必然报错，
+      # 而那正是用例要验证的东西。
+      - name: Type check
+        run: uv run mypy src
+
+      # --source=src 是必须的：不写的话 coverage 会把 pytest 自身也算进来，
+      # 分母被稀释，100% 门槛就失去意义。
+      - name: Test
+        run: uv run coverage run --source=src -m pytest -q
+
+      # 100% 不是 90%。这个包一共几百行，每一行都决定历史评测能不能复现、
+      # 哪笔 burn 算数、谁拿到排放 —— 没有"这段不重要"的行。
+      # pyproject 里也写了 fail_under=100，这里再显式写一遍，是防止有人
+      # 悄悄调低配置后 CI 依然绿。
+      - name: Coverage gate
+        run: uv run coverage report --fail-under=100
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # 发布前的最后一道：能不能打出包、打出来的包装上之后还是不是完整的。
+  # 每次 PR 都跑，不是只在 tag 上跑 —— 打包坏了要在合并前知道，不是在
+  # 发 1.0.0 的那一刻知道。
+  #
+  # 这里**没有** uv publish，是故意的。发 PyPI 需要 trusted publisher 配置
+  # 加一次人工确认；接上之前，CI 只负责证明"包是能出的"。
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: build (no publish)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [ci, golden-vectors]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      # 版本号就是契约版本。tag 与 pyproject 对不上意味着消费方钉死的
+      # `openroboto-protocol==1.0.0` 装到的是别的东西 —— 这个包唯一的存在理由
+      # （两边能被证明装的是同一份）当场作废。
+      - name: Tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(uv version --short)"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag v${tag} != pyproject version ${version}"
+            exit 1
+          fi
+          echo "tag v${tag} matches pyproject version"
+
+      - run: uv build
+
+      # 零依赖承诺写在 wheel 的 METADATA 里，就在这里查，不靠自觉。
+      # 带 `extra ==` 标记的依赖没问题 —— 那是消费方自己选装的（后端装
+      # `openroboto-protocol[schemas]` 才拿 pydantic）。**没有标记**的一条
+      # 就意味着每台矿工 GPU 机器都被迫装它，那是矿工替我们的方便付钱。
+      - name: Wheel declares no unconditional dependencies
+        run: |
+          meta="$(unzip -p dist/*.whl '*.dist-info/METADATA')"
+          unconditional="$(printf '%s\n' "$meta" \
+            | grep '^Requires-Dist:' | grep -v 'extra ==' || true)"
+          if [ -n "$unconditional" ]; then
+            echo "::error::wheel declares unconditional runtime dependencies:"
+            echo "$unconditional"
+            exit 1
+          fi
+          printf '%s\n' "$meta" | grep -E '^(Requires-Dist|Provides-Extra):' || echo "no dependencies at all"
+
+      # 装上打出来的 wheel 再验一遍。两件事只有装完才看得见：
+      #   1. py.typed 有没有进包 —— 少了它，消费方的 mypy 会把这个包整个当 Any，
+      #      不报错、静默失效，而"消费方 mypy 认得类型"正是发包的主要收益之一；
+      #   2. 有没有模块漏进 wheel —— 遍历包内所有模块逐个 import，
+      #      新加模块自动被覆盖，不用回来改这段。
+      # extras 从 METADATA 里读，不写死名字：装全 extras 才能 import 到需要
+      # 可选依赖的模块（今天是 schemas 要 pydantic），而 extras 改名或增删时
+      # 这一步不用跟着改。
+      - name: Smoke test the built wheel
+        run: |
+          wheel="$(ls dist/*.whl)"
+          extras="$(unzip -p "$wheel" '*.dist-info/METADATA' \
+            | sed -n 's/^Provides-Extra: //p' | paste -sd, -)"
+          # 写成 if 而不是 `[ -n .. ] && ..`：GitHub 的默认 shell 是 `bash -e`，
+          # extras 为空时那种写法整条语句返回 1，直接把这一步判失败。
+          if [ -n "$extras" ]; then
+            wheel="${wheel}[${extras}]"
+          fi
+          echo "installing ${wheel}"
+          uv run --isolated --no-project --with "$wheel" python - <<'PY'
+          import importlib
+          import pathlib
+          import pkgutil
+
+          import openroboto_protocol
+
+          root = pathlib.Path(openroboto_protocol.__path__[0])
+          modules = [m.name for m in pkgutil.iter_modules(openroboto_protocol.__path__)]
+          assert modules, f"wheel shipped no modules: {root}"
+          for name in modules:
+              importlib.import_module(f"openroboto_protocol.{name}")
+
+          assert (root / "py.typed").is_file(), (
+              "py.typed missing from the wheel — consumers' mypy would silently "
+              "treat this package as Any"
+          )
+          print(f"wheel ok: {len(modules)} modules + py.typed")
+          PY
+
+      - name: Upload dist
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist
+          # 默认 90 天。GitHub Free 的 Actions 存储只有 500 MB，
+          # 长保留期的产物会悄悄把额度吃光然后开始计费。
+          retention-days: 7

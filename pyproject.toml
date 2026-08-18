@@ -1,0 +1,95 @@
+[project]
+name = "openroboto-protocol"
+# 1.0.0，不是 0.1.0。版本号**就是**契约版本（README「Versioning is a promise」），
+# 而消费方钉死的是精确版本：`openroboto-protocol==1.0.0`。0.x 在 SemVer 下不承诺
+# 任何兼容性，等于对着「两边装的是同一份」这个唯一卖点说「不保证」。
+# 改这个数之前先看 README 的 Release 一节：patch / minor / major 各自意味着什么，
+# major 需要一份链上数据迁移方案。
+version = "1.0.0"
+description = "Shared protocol contract for the OpenRoboto subnet on Bittensor (netuid 80): seed derivation, commitment codec, model hashing, status vocabulary and API schemas."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "OpenRoboto", email = "cameron@moonshotcommons.com" }]
+keywords = ["bittensor", "openroboto", "subnet", "protocol"]
+
+# ⚠️ 3.11，不是 uv init 默认的 3.12。矿工侧跑的就是 3.11
+# （openroboto-subnet 的 Dockerfile 和 SETUP_NATIVE.md 都写死 python3.11，
+#   openroboto-evaluation 是 >=3.11）。写 3.12 等于所有矿工装不上。
+# backend 自己是 3.12，向下兼容，没问题。
+requires-python = ">=3.11"
+
+# 保持零运行时依赖。这个包会装进矿工和评测机的环境，多一个依赖就多一处
+# 版本冲突的可能。真要引（比如 schemas.py 需要 pydantic），单独讨论。
+dependencies = []
+
+classifiers = [
+    # 1.0.0 = 契约已冻结，与 "3 - Alpha" 直接矛盾。矿工在 PyPI 页面上看到的
+    # 就是这一行，它不能和版本号讲两个故事。
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/openroboto-ai/openroboto-protocol"
+Issues = "https://github.com/openroboto-ai/openroboto-protocol/issues"
+
+# `schemas.py` 是唯一需要 pydantic 的模块，走 optional-dependency，主
+# `dependencies` 保持空。
+#
+# 为什么不进主 `dependencies`：矿工装这个包只为推导 seed 和解 commitment
+# （`seed.py` / `commitment.py` / `model_hash.py` 三个纯函数模块），
+# 不该被迫在 GPU 机器上编译一个 pydantic-core 轮子。
+# `__init__.py` 不 re-export 任何东西，所以 `import openroboto_protocol` 永远不会
+# 触发 `import pydantic` —— 零依赖承诺靠这一条成立，不是靠自觉
+# （`tests/test_schemas.py::test_package_import_does_not_require_pydantic` 钉住）。
+#
+# 为什么 schemas 又值得用 pydantic（而不是继续用 stdlib dataclass）：
+# 后端是 FastAPI，dataclass 版本有一个**实测出来的天花板** —— 违例只能在
+# `__post_init__` 里拦，而那时框架已经把 JSON 值转过一轮了。用真的 pydantic 模型
+# 才能把 `StrictBool` / `StrictInt` 标上去，让「bool 冒充数字」这种事
+# （生产 `_validate_env_scores` 的第 1 道检查，历史代价是 `samples=-5` 直接夺擂）
+# 在**模型层**就不可表达，而不是靠每个调用方记得先手工校验一遍。
+#
+# 消费方：`openroboto-backend` 装 `openroboto-protocol[schemas]`。
+[project.optional-dependencies]
+schemas = ["pydantic>=2.9,<3"]
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.3,<10.0.0",
+    "coverage>=7.4.3,<8.0.0",
+    "mypy>=1.8.0,<3.0.0",
+    "ruff>=0.2.2,<1.0.0",
+    # 本地要能跑 tests/test_schemas.py 和对 schemas.py 做 mypy，
+    # 所以 dev 环境把 optional-dependency 装上。这不改主 `dependencies`。
+    "openroboto-protocol[schemas]",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "T20", "RUF"]
+# 本仓的注释与 docstring 按约定写中文，中文标点（，。：；）会被 RUF001-003 当成
+# "和 ASCII 长得像的可疑字符"逐个报出来。规则本身是防同形字攻击的，对中文文档是纯噪音。
+# 只关这三条，RUF 其余规则保持开启。
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+
+[tool.coverage.report]
+# 红线区。这个包里的每一行都决定历史评测能不能复现，不留缺口。
+fail_under = 100
+show_missing = true
