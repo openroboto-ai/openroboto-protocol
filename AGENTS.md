@@ -48,18 +48,75 @@ dependencies = []   # 保持这样
 > ⚠️ **`0.x` 阶段这张表还没生效。** 版本号是 `0.x` 时**不承诺兼容** ——
 > `schemas.py` 的形状和 `status.py` 的词表都还可能不走 major 就改。
 >
-> 这是有意的，而且它的结束条件是一个事件不是一个日期：
-> **`openroboto-backend` 和 `openroboto-cli` 还没有确定各自的上线版本。**
-> 今天它俩甚至装不上这个包 —— backend 里还留着 3 处手抄副本
-> （`app/domain/worker_reports.py`、`app/domain/reasons.py`、
-> `app/api/envelope.py` 的复制段），而那正是这个包要消灭的漂移本身。
-> 给一份从没被真正消费过的契约冻结版本号，冻住的是它**碰巧长成的**形状，
-> 不是集成之后证明它**需要**的形状。
+> 这是有意的，而且它的结束条件是一个事件不是一个日期。给一份从没被真正消费过的
+> 契约冻结版本号，冻住的是它**碰巧长成的**形状，不是集成之后证明它**需要**的形状。
 >
-> **`1.0.0` 在 backend 和 cli 各自钉死上线版本那一刻发。** 从那一版起这张表生效，
-> 而且不许再退回 `0.x` —— `tests/test_version.py` 就是执行者。
+> **`1.0.0` 在下面四条全部打勾那一刻发。** 每一条都不是"应该做的好事" ——
+> 缺任何一条，上面那张 bump 表都是一句**无法执行**的话。
+>
+> - [ ] **`openroboto-backend` 和 `openroboto-cli` 各自钉死上线版本。**
+>   `major` 的定义是"破坏性变更，需要迁移方案"。没有上线版本就没有"要迁移的那一方"，
+>   于是任何改动都能被论证成不破坏任何人 —— review 时 `major` 和 `minor` 的分界线
+>   没有判据可依，那张表只是三行好听的话。
+>
+> - [ ] **backend 的 3 处手抄副本删干净，改成从子模块 import。**
+>   `app/api/envelope.py`（345 行）· `app/domain/reasons.py`（244 行）·
+>   `app/domain/worker_reports.py`（316 行），合计 905 行。
+>   这个包唯一的卖点是"两边装的能被证明是同一份"。副本还在，这句话**字面为假**。
+>   更糟的是守副本的 parity 测试（`test_envelope_parity` / `test_worker_reports` /
+>   `test_worker_contract_parity` 等五个文件）在协议包缺失时**整体 skip** ——
+>   backend 的 CI 今天是绿的，而那份绿什么都没证明。
+>   1.0 冻结的必须是一份**真被 import 过**的形状。
+>
+> - [ ] **`normalize_weights` 收进本包，两边的副本删掉。**
+>   今天两份：`openroboto-backend/app/services/chain_writer.py:82` 和
+>   `openroboto-cli/src/openroboto/chain/weights.py:31`。
+>   这是链上排放的**最后一道换算**，而它根本不在这个包的表面上 ——
+>   1.0 的兼容承诺覆盖不到子网最关键的那一步。
+>   两份今天数值一致（2010 组输入实测 0 分歧，含链上快照 122），但**没有任何东西
+>   守着它继续一致**：返回类型（`tuple` vs `NormalizedWeights` dataclass）、
+>   上限常量（字面量 `65535` vs 具名 `U16_MAX`）、日志语言、参数名
+>   （`uids` vs `hotkeys`）已经各走各的，测试也是两套独立的；而"快照里有、
+>   metagraph 里没有的 hotkey 被静默丢掉"这件事**只有 backend 会打 WARNING**。
+>   三处反直觉细节（`w > 0` 严格大于 · 先除后乘 · `int()` 截断不四舍五入）
+>   任何一处单边被"修"，两边算出的 u16 就不同，链上共识被平均掉 ——
+>   **不报错、不告警、无法回溯**。
+>   ⚠️ 搬运时**不要**把 `chain_writer.py` 那个截断例子一起搬进来：它写的
+>   `1/3 → int(21844.999…) = 21844` 是错的（`(1/3)*65535` 精确等于 `21845.0`，
+>   三份相加正好 65535）。真正的证据是链上快照 122 自己：`0.9*65535 == 58981.5`，
+>   `int` 给 58981、`round` 给 58982 —— 改成 `round()` 会直接改掉一个历史值。
+>
+> - [ ] **每个模块声明 `__all__`，并有一条测试钉住这张表。**
+>   今天只有 `schemas.py` 有（72 项），`constants` / `status` / `seed` /
+>   `model_hash` / `model_format` / `commitment` **6 个模块一个都没有**。
+>   SemVer 承诺的对象是"公开表面"。表面没有定义，`patch`（行为不变）和
+>   `major`（破坏性）之间就没有判据 —— 删掉 `status.py` 里一个没人知道算不算
+>   公开的辅助函数，算哪一种？`tests/test_schemas.py::test_every_exported_model_is_pinned`
+>   已经是这条的样板，补的是其余 6 个模块。
+>   **顶层 `__init__.py` 的 `__all__` 保持空**：消费方一律从子模块 import
+>   （见下面「导入形状」）。
+>
+> 1.0 发出去之后**不许再退回 `0.x`**：那等于把已经生效的承诺收回，而消费方
+> `==` 钉着的版本不会自己知道这件事。`tests/test_version.py` 是执行者 ——
+> 它同时守两个方向：0.x 却没写"不承诺兼容"、以及 1.0 了还留着这句话。
 
-消费方钉死精确版本（`openroboto-protocol==0.1.0`）。浮动版本和本地 vendored 副本
+**导入形状：一律从子模块导入，顶层不 re-export 任何符号。**
+
+```python
+from openroboto_protocol.seed import derive_seed  # ✅
+from openroboto_protocol.status import normalize_stage  # ✅
+from openroboto_protocol import derive_seed  # ❌ 顶层没有这个名字
+```
+
+这不是风格偏好，是零依赖承诺的实现方式：`schemas.py` 是唯一需要 pydantic 的模块
+（走 `[schemas]` extra）。顶层一旦 re-export，`import openroboto_protocol` 就会
+拖进 pydantic —— 矿工只为推导 seed 装这个包，不该在 GPU 机器上编译 pydantic-core。
+`tests/test_schemas.py::test_miner_facing_imports_do_not_require_pydantic` 钉住这一条
+（它断言 `openroboto_protocol.__all__ == []`）。
+实测：`import openroboto_protocol` 0.24 ms，`openroboto_protocol.schemas` 74 ms。
+两仓今天 24 条真实 import 全是子模块形状，**从顶层拿符号的 0 条** —— 迁移成本为零。
+
+消费方钉死精确版本（`openroboto-protocol==0.2.0`）。浮动版本和本地 vendored 副本
 都由消费方 CI 拒绝（两条检查的原文在 README「What consumers must add to their own CI」，
 已经跑在 `openroboto-backend` 和 `openroboto-cli` 上）。
 

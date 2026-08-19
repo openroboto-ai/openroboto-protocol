@@ -1,11 +1,16 @@
 [project]
 name = "openroboto-protocol"
-# 1.0.0，不是 0.1.0。版本号**就是**契约版本（README「Versioning is a promise」），
-# 而消费方钉死的是精确版本：`openroboto-protocol==1.0.0`。0.x 在 SemVer 下不承诺
-# 任何兼容性，等于对着「两边装的是同一份」这个唯一卖点说「不保证」。
-# 改这个数之前先看 README 的 Release 一节：patch / minor / major 各自意味着什么，
-# major 需要一份链上数据迁移方案。
-version = "0.1.0"
+# 版本号**就是**契约版本（README「Versioning is a promise」），消费方钉死的是精确
+# 版本：`openroboto-protocol==0.2.0`。README 和 AGENTS.md 必须同步改 ——
+# `tests/test_version.py` 双向守着（钉版一致 + 0.x 必须写明「不承诺兼容」）。
+#
+# **停在 0.x 是裁决，不是拖延**：backend 和 cli 都还没钉上线版本，也还没真正
+# import 过这个包，冻结版本号只会冻住它碰巧长成的形状。1.0.0 的四条前置条件
+# 写在 AGENTS.md §1② 的可勾清单里。0.x 阶段不承诺兼容，所以像本轮
+# （0.1.0 → 0.2.0）这样收紧 schemas 的哨兵默认值是允许的。
+#
+# ⚠️ 0.1.0 已经发到 PyPI（2026-08-19，OIDC）。PyPI 版本号不可重用，只能往前发。
+version = "0.2.0"
 description = "Shared protocol contract for the OpenRoboto subnet on Bittensor (netuid 80): seed derivation, commitment codec, model hashing, status vocabulary and API schemas."
 readme = "README.md"
 license = "MIT"
@@ -24,8 +29,10 @@ requires-python = ">=3.11"
 dependencies = []
 
 classifiers = [
-    # 1.0.0 = 契约已冻结，与 "3 - Alpha" 直接矛盾。矿工在 PyPI 页面上看到的
-    # 就是这一行，它不能和版本号讲两个故事。
+    # ⚠️ 未裁决：这一行是按"1.0.0 = 契约已冻结"写的，而版本停在了 0.x 且
+    # README / AGENTS.md 明写「不承诺兼容」—— 矿工在 PyPI 页面上看到的就是这一行，
+    # 它和版本号今天讲的是两个故事。要么随 1.0.0 一起坐实，要么先降成
+    # "4 - Beta"。**不要顺手改**：这是矿工侧的产品判断，需要人来定。
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3.11",
