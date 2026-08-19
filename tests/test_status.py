@@ -245,7 +245,8 @@ def test_stage_order_is_the_worker_execution_order() -> None:
     ],
 )
 def test_legacy_status_aliases(legacy: str, unified: str) -> None:
-    """生产库的遗留 `status` 列还在用这些词，与 eval_status 有 52 行不一致。"""
+    """这些老词今天还活在生产数据里（2026-08-19 副本：done 37 / failed 4 /
+    confirmed 1 / enqueued 17），归一必须只发生在一个地方。"""
     assert S.normalize_status(legacy) == unified
     assert unified in S.ALL_STATUSES
 

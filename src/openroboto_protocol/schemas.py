@@ -363,9 +363,18 @@ class MinerRef(Contract):
 class ModelRef(Contract):
     name: str
     hf_repo: str
-    #: 得分那次任务的 `hf_commit`（不变量 6）。查不到就留空串，
+    #: 得分那次任务的 `hf_commit`（不变量 6）。
     #: **禁止回落到该矿工的其它提交** —— 那是事故 C 的形状。
-    revision: str = ""
+    #:
+    #: ⚠️ **查不到是 `null`，不是空串。** 唯一来源是 40 位 `hf_commit`
+    #: （CLI `preflight.py` 强制校验后才上链），所以 `""` 从来不是一个合法的
+    #: revision，它只可能表示「后端没查到」。而 `""` 在 HuggingFace 的 URL 语义里
+    #: 是「用默认分支」—— 拿它去拼 `.../tree/{revision}` 会静默跳到 main，
+    #: 审计方核对的就不是得分那次的 commit 了。`null` 让「没有值」无处可藏。
+    #: `None` = 没钉 commit。**空串不行**：前端拼
+    #: `huggingface.co/{repo}/tree/{revision}` 时 `""` 会静默落到默认分支
+    #: （看起来正常、指向的却是另一份代码），`None` 至少是个响亮的 404。
+    revision: Annotated[str, Field(min_length=1)] | None = None
 
 
 class ScoreStat(Contract):
@@ -996,7 +1005,13 @@ class QueueStatusTask(Contract):
     hf_commit: str
     submitted_at: datetime | None = None
     #: SQL 里已经查了但线上没放进响应，契约要求补上。
-    round_num: int = 0
+    #:
+    #: ⚠️ **没有默认值，必填。** 队列里的每一条任务**必然属于某一轮** ——
+    #: 「不知道是哪一轮」不是一个合法状态，`round_num=0` 更不是：第 0 轮不存在，
+    #: 而 0 会被前端和矿工的 curl 当成一个真实轮次去过滤，静默捞回空列表。
+    #: 生产列是 `NOT NULL`、后端恒填、2026-08-19 副本 119 行里 0 条为 0 ——
+    #: 这个默认值一行都触发不到，留着只会让「忘了填」变得可表达。
+    round_num: int
     reason: Reason | None = None
     #: 进度条数据。契约卡里管它叫 "progress"，但 history 里同一份数据叫 `detail` ——
     #: 同一件事两个名字正是本文件要消灭的东西，统一叫 `detail`。
@@ -1034,9 +1049,11 @@ class SubmissionHistoryItem(Contract):
     - 删 `legacy_task_id` / `repo_hash` / `hotkey_tag` / `worker_id`：内部字段。
       `repo_hash` 是**抄袭判定的模型指纹**，公开它等于把判定依据交出去。
     - 删 `eval_detail`：`detail` 已经是它的解析版，两份重复占了响应体一大截。
-    - **永不返回 `status`**（迁移前的遗留列）：前端 `normalizeHistoryStatus()` 写的是
-      `submission.status || submission.eval_status || …`，**先读 `status`**，
-      而两列有 52 行不一致 —— 95 条里 33 条状态显示错误的根因。旧实现是在出口
+    - **永不返回 `status`**：前端 `normalizeHistoryStatus()` 写的是
+      `submission.status || submission.eval_status || …`，**先读 `status`** ——
+      同一个响应里出现两个状态键，先读到的恰好是没归一的那个，
+      95 条里 33 条状态显示错误就是这么来的（生产两个来源 2026-08-19 副本实测
+      80 行不一致）。这个响应只许有**一个**状态键。旧实现是在出口
       `row.pop("status", None)` 才躲过一劫；这里靠「模型里没有这个字段」保证，
       并由 `tests/test_schemas.py` 钉死。
 
@@ -1071,9 +1088,35 @@ class SubmissionHistoryItem(Contract):
     detail: dict[str, Any] | None = None
     #: 原样保留 —— 矿工文档教的就是读它。`reason` 是加法，不是替换。
     reject_reason: str = ""
-    seed: int = 0
-    drand_random: str = ""
-    drand_round: int = 0
+    #: 派种子的三件套。⚠️ **没派过种子是 `null`，不是 0 / 空串**，三个字段
+    #: 必须一起有或一起没有 —— 否则会发出 `{seed: null, drand_random: "",
+    #: drand_round: 0}` 这种一个字段说「没有」、隔壁说「有」的响应。
+    #:
+    #: 为什么 0 不行，`drand_round` 是最锋利的那条：drand 官方 API 的
+    #: `/public/0` 返回 **HTTP 200**，内容是**当天最新的那一轮**（`latest` 的别名，
+    #: 2026-08-19 实测）。审计方拿着我们发布的 `drand_round: 0` 照着查，
+    #: 不报错、不 404，会拿到一份今天的信标，然后 `verify_seed()` 必然 False ——
+    #: 而他无从判断是我们作弊还是数据缺失。本包的 `seed.drand_round_url()`
+    #: 已经对 `<= 0` 直接 `raise`，这里再把 0 当默认值发出去就是自相矛盾。
+    #:
+    #: `seed` 同理且更隐蔽：0 是 `derive_seed()` 的**合法输出**
+    #: （`int.from_bytes(sha256[-4:])`，概率 1/2³²），靠「0 一定是假的」区分不了。
+    #: 生产 2026-08-19 副本里 20 条 `seed=0` 全部是「没派过种子」，其中 11 条
+    #: 已经出分进过榜单 —— 它们的评测结果不可复现，而响应里看不出来。
+    #:
+    #: 🔴 **约束只加在能加的两个上，`seed` 故意没有。**
+    #: 去掉默认值只改变「字段被省略时给什么」，**并不拒绝显式传进来的 0** ——
+    #: 而真正把 0 发上线的是生产方（后端仓储层曾写 `seed=m.seed or 0`，
+    #: 主动把 NULL 抹成 0）。所以这里必须是**约束**不是默认值，否则这一整段
+    #: 注释描述的失败全都拦不住，只是看起来拦住了。
+    #:
+    #: `seed` 不能加 `gt=0`：0 是 `derive_seed()` 的**合法输出**
+    #: （`int.from_bytes(sha256[-4:])` 值域含 0，概率 1/2³²）。给它加约束等于
+    #: 有朝一日拒绝一个真实的种子，而那条提交会因此永远进不了榜 —— 比它想防的更贵。
+    #: `seed` 靠的是下面那条三元组校验：单独出现 0 而另外两个是 None，会被拒。
+    seed: int | None = None
+    drand_random: Annotated[str, Field(min_length=1)] | None = None
+    drand_round: Annotated[int, Field(gt=0)] | None = None
     #: ⚠️ 抄袭指纹。是否该继续公开待产品判断（spec 06 §7 Q5），
     #: 在裁决之前保持线上现状（返回），**不要顺手删也不要顺手加 `repo_hash`**。
     model_hash: str = ""
@@ -1084,6 +1127,42 @@ class SubmissionHistoryItem(Contract):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     reason: Reason | None = None
+
+    @model_validator(mode="after")
+    def _seed_triple_is_all_or_nothing(self) -> SubmissionHistoryItem:
+        """种子三元组必须**一起有或一起没有**。
+
+        这是 `seed` 唯一的守法 —— 它不能像 `drand_round` 那样加 `gt=0`
+        （0 是 `derive_seed()` 的合法输出），所以只能靠它和同伴的一致性来判。
+
+        挡的是这个形状：`{seed: 0, drand_round: null, drand_random: null}`。
+        单看 `seed` 分不出「种子真的是 0」和「没派过种子」，但配上另外两个就能分：
+        **真派过种子的那次，三个字段必然同时有值**（`derive_seed` 的输入就是
+        block_hash + round + drand_random，缺一个都算不出来）。
+
+        生产 2026-08-19 副本里 20 条 `seed=0` 全部是这个形状，其中 11 条已经出分
+        进过榜单 —— 它们的评测结果不可复现，而响应里看不出来。这条校验让那 11 条
+        在序列化那一刻就炸，而不是等审计方去查 drand 才发现。
+        """
+        present = [
+            self.seed is not None,
+            self.drand_random is not None,
+            self.drand_round is not None,
+        ]
+        if any(present) and not all(present):
+            missing = [
+                name
+                for name, ok in zip(
+                    ("seed", "drand_random", "drand_round"), present, strict=True
+                )
+                if not ok
+            ]
+            raise ValueError(
+                f"种子三元组不完整：缺 {missing}。"
+                "有值的那几个说「派过种子」、缺的那几个说「没派过」，"
+                "而 derive_seed 的输入三者缺一不可 —— 这条记录不可复现"
+            )
+        return self
 
 
 class SubmissionHistoryResponse(Contract):
@@ -1129,7 +1208,10 @@ class EvalEnvironment(Contract):
     #: 要么从元数据取、要么删字段 —— 未裁决，保持现状不要再硬编码一次。
     sim: str = ""
     eval_commit: str = ""
-    seed: int = 0
+    #: ⚠️ 与 `SubmissionHistoryItem.seed` 同一件事：没派过种子是 `null` 不是 0。
+    #: 这个字段是审计方复现评测的输入，`0` 会被照着跑出一份不一样的结果而不报错。
+    #: 外层 `SubmissionDetail.environment` 本来就是 `| None`，内层跟上才自洽。
+    seed: int | None = None
 
 
 class SubmissionArtifacts(Contract):
@@ -1302,7 +1384,13 @@ class Baseline(Contract):
     model_name: str
     hf_repo: str
     score: ScoreStat
-    revision: str = ""
+    #: ⚠️ 与 `ModelRef.revision` 同一件事：基线模型从没人钉过 commit，
+    #: 那是「没有值」不是「空串这个值」。`""` 拼进 HF URL 会跳默认分支 ——
+    #: 基线换了模型，历史榜单会安静地指向新的权重。
+    #: `None` = 没钉 commit。**空串不行**：前端拼
+    #: `huggingface.co/{repo}/tree/{revision}` 时 `""` 会静默落到默认分支
+    #: （看起来正常、指向的却是另一份代码），`None` 至少是个响亮的 404。
+    revision: Annotated[str, Field(min_length=1)] | None = None
 
 
 class LeaderboardResponse(Contract):

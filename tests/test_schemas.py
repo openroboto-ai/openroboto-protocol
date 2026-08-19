@@ -314,12 +314,12 @@ def test_every_exported_model_is_pinned() -> None:
 
 
 def test_history_item_never_exposes_legacy_status_column() -> None:
-    """history 行**永不返回 `status`**（迁移前的遗留列）。
+    """history 行**永不返回 `status`** —— 一个响应只许有一个状态键。
 
     前端 `normalizeHistoryStatus()` 是 `submission.status || submission.eval_status`，
-    **先读 `status`**，而生产两列有 52 行不一致 —— 95 条里 33 条状态显示错误就是
-    这么来的。旧实现靠出口 `row.pop("status", None)` 才躲过一劫；这里靠模型里根本
-    没有这个字段。
+    **先读 `status`**，先读到的恰好是没归一的那个 —— 95 条里 33 条状态显示错误就是
+    这么来的（生产两个来源 2026-08-19 副本实测 80 行不一致）。旧实现靠出口
+    `row.pop("status", None)` 才躲过一劫；这里靠模型里根本没有这个字段。
     """
     assert "status" not in _serialized_keys(s.SubmissionHistoryItem)
     assert "eval_status" in _serialized_keys(s.SubmissionHistoryItem)
@@ -954,6 +954,127 @@ def test_empty_database_returns_round_null_not_an_error_object() -> None:
 def test_score_std_is_none_not_zero_for_single_trial() -> None:
     """只跑过一次的提交 `std` 是 `None`，**不是 0** —— 0 会被读成「零方差」。"""
     assert s.ScoreStat(mean=0.5).std is None
+
+
+# --- 「没有值」不许伪装成 0 / 空串 ---
+#
+# 这一组守的是同一件事：`0` 和 `""` 都是**合法取值**，拿它们当「缺值」的哨兵，
+# 消费方就再也分不开「没有」和「值恰好是这个」。而这几个字段的消费方是
+# 矿工与外部审计方 —— 分不开的后果是核对静默失败，没有任何一方会收到错误。
+
+
+def _queue_status_task(**overrides: Any) -> s.QueueStatusTask:
+    payload: dict[str, Any] = {
+        "task_id": "task_abc_r1_v1",
+        "hotkey": "5FQxZ",
+        "uid": 7,
+        "eval_status": STATUS_PENDING,
+        "burn_status": "confirmed",
+        "commit_block": 1234,
+        "burn_block": 1230,
+        "hf_repo_id": "x/y",
+        "hf_commit": "a" * 40,
+        "round_num": 1,
+    }
+    payload.update(overrides)
+    return s.QueueStatusTask.model_validate(payload)
+
+
+def _history_item(**overrides: Any) -> s.SubmissionHistoryItem:
+    payload: dict[str, Any] = {
+        "id": 1,
+        "task_id": "task_abc_r1_v1",
+        "uid": 7,
+        "hotkey": "5FQxZ",
+        "round_num": 1,
+        "hf_repo_id": "x/y",
+        "hf_commit": "a" * 40,
+        "commit_block": 1234,
+        "commit_block_timestamp": 1755000000,
+        "burn_tx_hash": "0x" + "b" * 64,
+        "burn_block": 1230,
+        "burn_status": "confirmed",
+        "block_hash": "0x" + "c" * 64,
+        "eval_status": "evaluated",
+    }
+    payload.update(overrides)
+    return s.SubmissionHistoryItem.model_validate(payload)
+
+
+def test_seed_triple_is_null_when_no_seed_was_ever_assigned() -> None:
+    """没派过种子 → `seed` / `drand_random` / `drand_round` **三个一起是 `null`**。
+
+    `drand_round=0` 是最锋利的那条：drand 官方 API 的 `/public/0` 返回 **200**，
+    内容是当天最新的那一轮（`latest` 的别名，2026-08-19 实测）。审计方照着查
+    不会 404，会拿到一份今天的信标，然后 `verify_seed()` 必然 False —— 而他无从
+    判断是我们作弊还是数据缺失。本包的 `seed.drand_round_url()` 对 `<= 0` 已经
+    `raise`，schemas 再把 0 发出去就是同一个包自相矛盾。
+
+    `seed=0` 更隐蔽：0 是 `derive_seed()` 的合法输出（1/2³²），没法靠猜排除。
+    生产 2026-08-19 副本里 20 条 `seed=0` 全是「没派过种子」，其中 11 条已经出分
+    进过榜单 —— 它们不可复现，而响应里看不出来。
+
+    三个必须一起：只改 `drand_round` 会发出「一个字段说没有、隔壁说有」的响应。
+    """
+    item = _history_item()
+    assert item.seed is None
+    assert item.drand_random is None
+    assert item.drand_round is None
+    assert s.EvalEnvironment().seed is None
+    # 0 仍然是可表达的**真值** —— 这正是它不能兼任哨兵的原因，也是 `seed` 不能
+    # 像 `drand_round` 那样加 `gt=0` 的原因（那会拒掉一个真种子）。
+    # 但它必须**带齐同伴**：三元组是 `seed` 唯一的守法。
+    assert _history_item(seed=0, drand_random="ab", drand_round=1).seed == 0
+
+
+def test_seed_alone_is_rejected_because_zero_cannot_be_told_apart() -> None:
+    """只给 `seed` 不给同伴 → **拒绝**。这是 `seed=0` 唯一挡得住的地方。
+
+    `drand_round` 能加 `gt=0`、`drand_random` 能加 `min_length=1`，
+    而 `seed` 两样都不能（0 是 `derive_seed()` 的合法输出）。所以它靠的是
+    **一致性**：`derive_seed` 的输入是 block_hash + round + drand_random，
+    真派过种子的那次三个字段必然同时有值。
+
+    挡的正是生产里那 20 条的形状：`{seed: 0, drand_random: null, drand_round: null}`。
+    没有这条校验，它们会安静地序列化出去，而审计方拿 `drand_round: 0` 查 drand
+    会拿到当天最新那一轮（`/public/0` 是 `latest` 的别名）。
+    """
+    for kwargs in (
+        {"seed": 0},
+        {"seed": 5, "drand_round": 7},
+        {"drand_random": "ab"},
+    ):
+        with pytest.raises(ValidationError, match="种子三元组"):
+            _history_item(**kwargs)
+
+
+def test_revision_is_null_when_the_commit_is_unknown() -> None:
+    """查不到 `hf_commit` → `revision` 是 `null`，**不是 `""`**。
+
+    `revision` 的唯一来源是 40 位 commit SHA（CLI `preflight.py` 上链前强制校验），
+    所以 `""` 从来不是合法值。而 `""` 在 HF 的 URL 语义里是「默认分支」——
+    `.../tree/{revision}` 会静默跳到 main，审计方核对的就不是得分那次的权重了。
+    """
+    assert s.ModelRef(name="pi0.5", hf_repo="x/y").revision is None
+    assert (
+        s.Baseline(
+            model_name="pi0.5", hf_repo="x/y", score=s.ScoreStat(mean=0.5)
+        ).revision
+        is None
+    )
+
+
+def test_queue_task_round_num_cannot_be_omitted() -> None:
+    """队列行的 `round_num` **必填** —— 「不知道哪一轮」不是合法状态。
+
+    这一处和上面几个相反：它不该有 `None` 默认值，它根本不该有默认值。
+    第 0 轮不存在，而 `0` 会被前端和矿工的 curl 当成真实轮次去过滤，
+    静默捞回空列表。生产列 `NOT NULL`、后端恒填、119 行里 0 条为 0。
+    """
+    assert _queue_status_task().round_num == 1
+    with pytest.raises(ValidationError):
+        _queue_status_task(round_num=None)
+    assert s.QueueStatusTask.model_fields["round_num"].is_required()
 
 
 # --- 探针 ---

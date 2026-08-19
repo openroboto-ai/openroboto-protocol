@@ -9,12 +9,18 @@
 
 **两套词表不是一回事，混用是事故本身**：
 
-- **status**（`submissions.eval_status` 这一列）：提交走到哪一步。生命周期状态。
-- **stage**（`submissions.stage` 这一列）：worker 认领任务后在干什么。进度明细，
+- **status**：提交走到哪一步。生命周期状态，取值见 `ALL_STATUSES`。
+- **stage**：worker 认领任务后在干什么。进度明细，取值见 `ALL_STAGES`，
   只在 status 为 `evaluating` 期间有意义。
 
 `evaluating` 是 **status**；`running` 是 **stage**。它们描述的是同一段时间，
-但不是同一个字段，任何一边写成另一边的词都会被对方判为非法。
+但不是同一套词表，任何一边写成另一边的词都会被对方判为非法。
+
+⚠️ 这里说的是**词表**，不是承载它的字段名，更不是数据库列名。
+携带生命周期状态的响应字段**逐端点不同** —— `SubmissionRecord` 叫 `status`，
+其余四个模型叫 `eval_status`。哪个端点是哪个，以 `schemas.py` 的
+`STATUS_VALUED_FIELDS` 为准（那张表由 `tests/test_schemas.py` 逐条核对，
+不会和代码漂开）。**不要在这里记第二份。**
 
 **线上事实**（2026-08-17 curl `GET /api/v1/submissions/history?limit=500`，117 条）：
 
@@ -23,7 +29,10 @@
 - `stage` 出现过：`running` 61 / `""` 47 / `downloading` 8 / `prechecking` 1。
   **没有出现过 `evaluating`** —— 对外的规范阶段词是 `running`，这条是裁决依据。
 
-**这个模块不负责**：状态怎么持久化、谁有权改状态、超时怎么判。那些是后端的事。
+**这个模块不负责**：状态怎么持久化（存哪张表哪一列、哪一列是权威）、谁有权改状态、
+超时怎么判。那些是后端的事 —— 而且权威列在数据迁移前后是**相反**的
+（迁移前 `eval_status`，迁移后 `status`），写进这个包等于让一个不可回收的版本号
+去承诺一件别的仓库随时会改的事。
 """
 
 from __future__ import annotations
@@ -34,7 +43,7 @@ from types import MappingProxyType
 from typing import Final
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 提交状态（submissions.eval_status）
+# 提交状态（生命周期）
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 扫链刚看到这条 commitment，还没做任何校验。建行时的默认值（schema.py 的 DEFAULT）。
@@ -103,7 +112,8 @@ FROZEN_STATUSES: Final[frozenset[str]] = frozenset({STATUS_REJECTED, STATUS_SUPE
 #                                            （CASE WHEN eval_status='pending'，单向）
 #   pending       → evaluated / eval_failed  历史真实路径：修复前 update_task_progress
 #                                            只写 stage 不推状态，全库 0 条 evaluating，
-#                                            65 条 evaluated 全部是从 pending 直接落的。
+#                                            几十条 evaluated 全部是从 pending 直接落的
+#                                            （2026-08-19 副本：evaluated 66 条）。
 #                                            **删掉这条边等于宣布线上历史非法。**
 #   pending       → superseded               submission_db.py:supersede_pending —— 它的
 #                                            WHERE 只有一条 eval_status='pending'
@@ -168,7 +178,7 @@ def can_transition(current: str, new: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 评测阶段（submissions.stage）
+# 评测阶段（进度明细）
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -182,10 +192,16 @@ class Stage:
     """
 
     #: 对外的规范词。worker 该发这个，API 该返回这个，前端该按这个渲染。
-    #: 生产 `GET /api/v1/submissions/history` 返回的就是这一列（2026-08-17 实测）。
+    #: 生产 `GET /api/v1/submissions/history` 的 `stage` 字段返回的就是这个词
+    #: （2026-08-17 实测）。
     wire: str
-    #: 库里的历史存储值（带 `benchmark_` 前缀）。出口翻译前的样子，读老数据时会遇到；
-    #: **不要**把它吐给前端 —— 前端的 ACTIVE_STAGES 里没有带前缀的写法，认不出就不渲染。
+    #: 历史存储值（带 `benchmark_` 前缀）。出口翻译前的样子，读老数据时会遇到。
+    #: ⚠️ **两种写法是并存的**，不是「老数据全带前缀」：2026-08-19 的生产副本里
+    #: `running` 38 行、`benchmark_running` 24 行、`downloading` 8 行（裸）、
+    #: `benchmark_prechecking` 2 行（带前缀）。所以入口必须两种都收 —— 这正是
+    #: `_STAGE_LOOKUP` 把 wire / stored / aliases 三者并列的理由。
+    #: **不要**把带前缀的吐给前端 —— 前端的 ACTIVE_STAGES 里没有带前缀的写法，
+    #: 认不出就不渲染。
     stored: str
     #: 输入侧还接受的同义词。收下它们纯粹是加法：按公开文档或前端类型写的调用方
     #: 曾经因此收到 400（2026-08-14 实际发生）。
@@ -236,12 +252,15 @@ def normalize_stage(word: str) -> str | None:
 
 #: 老状态词 → 现行状态词。
 #:
-#: 生产库里这些值还在：`submissions` 有一列迁移前的遗留 `status`，与 `eval_status`
-#: 有 52 行不一致（`status='done'` 而 `eval_status='superseded'` 有 22 行）。
-#: 前端读的是 `submission.status || submission.eval_status`，先读到的是错的那个 ——
-#: 2026-08-14 队列页 95 条里 33 条状态显示错误，根因就是这两套词混在同一个响应里。
+#: 这些词今天还活在生产数据里（2026-08-19 副本实测：`done` 37 / `failed` 4 /
+#: `confirmed` 1 / `enqueued` 17），它们是同一件事在词表统一之前的四套写法。
 #:
-#: **真相只有 eval_status 一个。** 这张表只用于读老数据，不要用它生成新值。
+#: 出事的形状不是「有老词」，而是**两套词混进同一个响应**：前端按
+#: `submission.status || submission.eval_status` 读，先读到的恰好是没归一的那个 ——
+#: 2026-08-14 队列页 95 条里 33 条状态显示错误。所以归一必须发生在**一个**地方。
+#:
+#: **`ALL_STATUSES` 是唯一真源。** 这张表只用于读老数据，不要用它生成新值。
+#: 老词今天具体存在哪个存储位置、归一到哪一步为止，是后端的事，不在本模块的承诺范围内。
 LEGACY_STATUS_ALIASES: Final[Mapping[str, str]] = MappingProxyType(
     {
         "enqueued": STATUS_PENDING,
