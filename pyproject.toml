@@ -5,7 +5,7 @@ name = "openroboto-protocol"
 # 任何兼容性，等于对着「两边装的是同一份」这个唯一卖点说「不保证」。
 # 改这个数之前先看 README 的 Release 一节：patch / minor / major 各自意味着什么，
 # major 需要一份链上数据迁移方案。
-version = "1.0.0"
+version = "0.1.0"
 description = "Shared protocol contract for the OpenRoboto subnet on Bittensor (netuid 80): seed derivation, commitment codec, model hashing, status vocabulary and API schemas."
 readme = "README.md"
 license = "MIT"

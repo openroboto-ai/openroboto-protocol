@@ -9,9 +9,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==1.0.0"
+uv add "openroboto-protocol==0.1.0"
 # or
-pip install "openroboto-protocol==1.0.0"
+pip install "openroboto-protocol==0.1.0"
 ```
 
 ```python
@@ -29,7 +29,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==1.0.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.1.0"   # backend only
 ```
 
 ## Why this package exists
@@ -74,13 +74,32 @@ that makes an HTTP call cannot.
 
 The version number *is* the contract version.
 
+> ### ⚠️ `0.x` — the promise is not in force yet
+>
+> While the version is `0.x`, **compatibility is not promised**. The shapes in
+> `schemas.py` and the vocabularies in `status.py` may still change without a
+> major bump.
+>
+> This is deliberate, and it ends on a specific event, not on a date:
+> **`openroboto-backend` and `openroboto-cli` have not picked their launch
+> versions yet.** Neither of them can even install this package today — the
+> backend still carries three hand-copied mirrors (`app/domain/worker_reports.py`,
+> `app/domain/reasons.py`, the copied block in `app/api/envelope.py`), which is
+> the very drift this package exists to end. Freezing a contract that has never
+> been consumed would freeze whatever shape it happens to have, not the shape
+> integration proves it needs.
+>
+> **`1.0.0` ships when backend and CLI lock their launch versions against it.**
+> From that release on, the table below is binding and going back to `0.x`
+> is not an option — `tests/test_version.py` enforces exactly that.
+
 | Bump | Meaning |
 | --- | --- |
 | `patch` | Bug fix, behaviour unchanged |
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==1.0.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.1.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 ## What consumers must add to their own CI
@@ -220,10 +239,15 @@ dedicated CI job runs.
 
 ```bash
 uv sync                                          # install, including dev group
-uv run ruff check . && uv run mypy src           # lint + types (strict)
+bash scripts/lint.sh                             # ruff check + ruff format --check + mypy strict
 uv run coverage run --source=src -m pytest -q    # tests
 uv run coverage report --fail-under=100          # the gate
+uvx pre-commit install                           # optional: run the lint hooks before each commit
 ```
+
+CI runs `scripts/lint.sh` itself rather than repeating the commands, so green
+locally means green there. `pre-commit` is deliberately not in the dev dependency
+group: CI installs that group on every run and has no use for it.
 
 `--source=src` is not optional: without it `coverage` also measures pytest itself,
 the denominator inflates and the 100% gate stops meaning anything.
@@ -236,7 +260,7 @@ the denominator inflates and the 100% gate stops meaning anything.
 | --- | --- |
 | `golden vectors (RED = on-chain history was rewritten)` | Someone changed an input/output pair that already happened on chain. Not a test failure — a claim that the past was wrong |
 | `lint + tests (py3.11)` / `(py3.12)` | ruff, `mypy --strict` on `src`, pytest, and **coverage < 100%** |
-| `build (no publish)` | `uv build` broke, the wheel is missing modules or `py.typed`, or it grew an **unconditional** dependency (one without an `extra ==` marker — that one lands on every miner's machine) |
+| `build (packaging gate; publish lives in release.yml)` | `uv build` broke, `twine check --strict` rejected the metadata, the wheel is missing modules or `py.typed`, or it grew an **unconditional** dependency (one without an `extra ==` marker — that one lands on every miner's machine) |
 
 The matrix is not decoration: miners and the evaluator run 3.11 (the subnet
 `Dockerfile` hardcodes `python3.11`), the backend runs 3.12, and this package is
@@ -248,25 +272,44 @@ gets emissions. There is no line here that does not matter.
 
 ## Release
 
-CI **does not publish**. It proves a package can be built and that the built wheel
-is complete; pushing to PyPI is a deliberate human step until a trusted publisher is
-configured.
+A `v*` tag is the only publishing action. `.github/workflows/release.yml` takes it
+from there; nobody runs `uv publish` from a laptop.
 
 ```bash
-uv version 1.0.0              # or: uv version --bump patch|minor|major
-# commit the bump, open the PR, let CI go green
-git tag v1.0.0 && git push origin v1.0.0
+uv version --bump patch       # or minor|major — see the table above
+# commit the bump in the same PR as the change it describes, let CI go green, merge
+git tag v1.0.1 && git push origin v1.0.1
 ```
 
-On a `v*` tag, CI checks that the tag matches the version in `pyproject.toml` before
-building. A mismatch means consumers who pinned `openroboto-protocol==1.0.0` would
-install something else — which voids the only reason this package exists.
+The tag triggers, in order:
 
-Then, by hand, once:
+1. **The same gates every PR runs.** `release.yml` calls `ci.yml` with
+   `workflow_call` instead of restating a release-specific checklist — a second copy
+   would be the weaker one, and nobody maintains two. Golden vectors, 3.11 + 3.12,
+   100% coverage, `twine check`, and installing the built wheel to confirm every
+   module imports and `py.typed` shipped.
+2. **Tag/version agreement**, twice: `ci.yml` compares the tag against
+   `pyproject.toml`, and the publish job compares it against the artifact filenames
+   about to be uploaded. A consumer that pinned an exact version and got something
+   else voids the only reason this package exists.
+3. **A human.** The publish job runs in the `pypi` GitHub environment, which can
+   require a reviewer. PyPI never lets a version number be reused, not even after a
+   delete, so a wrong upload can only be walked forward with another patch release.
+4. **PyPI Trusted Publishing (OIDC).** No long-lived API token exists to leak. The
+   credential is minted for that one run, and PyPI additionally checks it came from
+   this repository, this workflow file and that environment. Same reasoning as
+   `openroboto-backend` using Workload Identity Federation instead of a service
+   account key.
 
-```bash
-uv build && uv publish
-```
+The publish job downloads the artifact the gates produced rather than rebuilding, so
+what reaches PyPI is the exact file that passed. It does not check the repository out
+at all: the only thing running with the OIDC token is `uv publish`.
+
+There is deliberately **no TestPyPI step**. The one thing it would add is "the index
+accepted an upload", and `twine check --strict` plus installing the wheel and
+importing every module already cover more than that. The cost is a second trusted
+publisher and a second environment to keep in sync — two configurations where only
+one will stay correct.
 
 ## License
 
