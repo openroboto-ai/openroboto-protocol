@@ -133,7 +133,16 @@ git tag v1.0.1 && git push origin v1.0.1     发布的唯一动作
 
 ## 4. 约定
 
-- 语言：面向团队的注释与文档用中文，代码标识符 / 命令 / 字段名 / 包名保持英文。
+- **语言：commit message 一律英文。** 注释与文档用中文，代码标识符 / 命令 /
+  字段名 / 包名保持英文。
+  - **为什么 commit 单独拿出来**：它是**跨仓、对外、且不可改**的那一层。
+    `git log` / `git blame` / PR 列表 / release notes 会被外部消费者读到
+    （矿工、评测方、外部验证者），而这几个仓有的已经公开、其余的上线时都要公开。
+    注释和文档改一次就好，commit message 改要重写历史。
+  - 正文（body）也是英文。可以引用中文文件名和中文标题（`docs/specs/07-worker契约组行为契约.md`），
+    那是标识符不是叙述。
+  - 格式沿用 Conventional Commits：`type(scope): summary`。summary 用祈使句、不超过
+    72 字符；body 讲**为什么**不是复述 diff。
 - 导出的函数、常量、dataclass、schema 必须有注释，说明**契约含义**而不是复述名字
   （`status` 的状态机语义、`CHAMPION_MARGIN` 是绝对值不是百分比）。
 - 一组必须同源的字段绑成 `frozen=True` dataclass，让错配在类型层就不可能发生。
