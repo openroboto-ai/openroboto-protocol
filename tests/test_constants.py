@@ -1,6 +1,7 @@
-"""constants.py 的契约测试。
+"""Contract tests for constants.py.
 
-数值全部是钱路径上的。改红任何一条之前先问：链上已经按旧值发生过什么？
+Every number here is on the money path. Before turning any of these assertions
+red, ask first: what has already happened on chain under the old value?
 """
 
 from __future__ import annotations
@@ -13,21 +14,24 @@ import pytest
 
 from openroboto_protocol import constants as C
 
-# ── 排放权重 ──────────────────────────────────────────────────────────────
+# ── Emission weights ──────────────────────────────────────────────────────
 
 
 def test_absolute_weights_are_the_effective_ones() -> None:
-    """生效口径：占全网总排放的绝对份额（`protocol/types.py:82` 一直是这个值）。"""
+    """The effective reading: the absolute share of total network emissions
+    (`protocol/types.py:82` has always carried this value)."""
     assert C.TOP_K_EMISSION_WEIGHTS == (0.07, 0.02, 0.01)
     assert C.TOP_K == 3
     assert C.TOP_K == len(C.TOP_K_EMISSION_WEIGHTS)
 
 
 def test_relative_weights_match_the_control_json_dialect() -> None:
-    """control.json 那套 [0.70, 0.20, 0.10] 是同一件事的另一种口径，不是另一套规则。
+    """The [0.70, 0.20, 0.10] set in control.json is another reading of the same
+    thing, not a second set of rules.
 
-    这条断言就是"数学上一致"这句话的可执行形式：
-    0.70 × (1 − 0.90 burn) = 0.07。两套数字从此不可能各自漂移。
+    This assertion is the executable form of the sentence "they agree
+    mathematically": 0.70 × (1 − 0.90 burn) = 0.07. From here on the two sets of
+    numbers cannot drift apart independently.
     """
     assert all(
         math.isclose(got, want)
@@ -37,15 +41,18 @@ def test_relative_weights_match_the_control_json_dialect() -> None:
 
 
 def test_burn_share_is_the_remainder() -> None:
-    """没进榜的 90% 全烧掉。与 backend.yaml 的 scanner.burn_ratio=0.9 一致。"""
+    """The 90% that did not make the leaderboard is all burned. Consistent with
+    scanner.burn_ratio=0.9 in backend.yaml."""
     assert math.isclose(C.TOP_K_EMISSION.burn_share, 0.90)
     total = sum(C.TOP_K_EMISSION_WEIGHTS) + C.TOP_K_EMISSION.burn_share
     assert math.isclose(total, 1.0)
 
 
 def test_weights_are_strictly_descending() -> None:
-    """权重降序就是排名序：rank 1 拿 TOP_K_EMISSION_WEIGHTS[0]。
-    排名引擎反过来靠"权重降序 = 排名顺序"还原榜单，打平或乱序会让还原出错。
+    """Descending weights *are* the rank order: rank 1 takes
+    TOP_K_EMISSION_WEIGHTS[0]. The ranking engine works backwards from
+    "descending weights = rank order" to reconstruct the leaderboard, so a tie or
+    a wrong order makes the reconstruction wrong.
     """
     w = C.TOP_K_EMISSION_WEIGHTS
     assert all(a > b for a, b in itertools.pairwise(w))
@@ -57,31 +64,67 @@ def test_emission_weights_are_frozen() -> None:
         C.TOP_K_EMISSION.absolute = (0.7, 0.2, 0.1)  # type: ignore[misc]
 
 
-# ── 夺擂门槛 ──────────────────────────────────────────────────────────────
+# ── Dethrone threshold ────────────────────────────────────────────────────
 
 
 def test_champion_margin_is_an_absolute_delta() -> None:
-    """0.01 是 avg_score 的绝对差值，不是百分比。旧注释写 "(2%)" 已误导过一次。"""
+    """0.01 is an absolute delta on avg_score, not a percentage. The old comment
+    saying "(2%)" has already misled someone once."""
     assert C.CHAMPION_MARGIN == 0.01
 
 
 def test_a_tie_loses_the_challenge() -> None:
-    """`chall_avg > target_avg + margin` —— 严格大于。
+    """`chall_avg > target_avg + margin` — strictly greater than.
 
-    平局判失败是反抄袭的基石：复制擂主的权重只能打平，打平输在 margin 上。
-    任何一处写成 `>=` 都等于单方面拆掉这道门槛。
+    Judging a tie as a loss is the cornerstone of anti-plagiarism: copying the
+    champion's weights can only tie, and a tie loses on the margin. Writing `>=`
+    anywhere is the same as unilaterally taking this gate down.
     """
     king = 0.80
-    assert not king + C.CHAMPION_MARGIN > king + C.CHAMPION_MARGIN  # 差值正好等于门槛
-    assert 0.8101 > king + C.CHAMPION_MARGIN  # 超出门槛才算赢
+    # delta exactly equal to the threshold
+    assert not king + C.CHAMPION_MARGIN > king + C.CHAMPION_MARGIN
+    assert 0.8101 > king + C.CHAMPION_MARGIN  # only exceeding the threshold wins
     assert not 0.8099 > king + C.CHAMPION_MARGIN
 
 
-# ── LIBERO 环境 ───────────────────────────────────────────────────────────
+# ── Burn-to-commitment window ─────────────────────────────────────────────
+
+
+def test_burn_block_window_is_the_production_value() -> None:
+    """50 blocks, in blocks -- not the 10 that deployment docs claimed.
+
+    Verified 2026-08-19 against production: `scanner.burn_block_window` in
+    backend.yaml, read by backend/config.py:77, enforced at
+    scanner/burn_verify.py:71.
+    """
+    assert C.BURN_BLOCK_WINDOW == 50
+
+
+def test_a_distance_exactly_equal_to_the_window_is_accepted() -> None:
+    """The backend rejects on `> window`, so equality passes.
+
+    A consumer that writes `>=` refuses submissions the backend would have
+    accepted -- the miner has already burned by then, so being stricter than the
+    enforcer costs them the fee for nothing.
+    """
+    burn, window = 1_000, C.BURN_BLOCK_WINDOW
+    assert not abs((burn + window) - burn) > window  # exactly at the edge: fine
+    assert abs((burn + window + 1) - burn) > window  # one past it: rejected
+
+
+def test_the_window_is_symmetric() -> None:
+    """`abs(burn_block - commit_block)`: a burn *after* the commitment counts too."""
+    window = C.BURN_BLOCK_WINDOW
+    assert abs(1_000 - (1_000 + window + 1)) > window
+    assert abs((1_000 + window + 1) - 1_000) > window
+
+
+# ── LIBERO environments ───────────────────────────────────────────────────
 
 
 def test_required_envs_are_the_six_production_suites() -> None:
-    """线上 117 条提交的 env_list 与 82 条出分记录的 env_scores 都恰好是这 6 个。"""
+    """The env_list of the 117 live submissions and the env_scores of the 82
+    scoring records are all exactly these 6."""
     assert C.REQUIRED_ENVS == {
         "libero_spatial",
         "libero_object",
@@ -94,13 +137,15 @@ def test_required_envs_are_the_six_production_suites() -> None:
 
 
 def test_required_envs_and_task_suites_are_same_source() -> None:
-    """不存在"允许跑 6 个但只要求 4 个"这种半截配置 —— 4 个的均值和 6 个的不可比。"""
+    """There is no half-way config that "allows running 6 but only requires 4" —
+    the mean over 4 and the mean over 6 are not comparable."""
     assert C.REQUIRED_ENVS == frozenset(C.LIBERO_TASK_SUITES)
-    assert len(C.REQUIRED_ENVS) == len(C.LIBERO_TASK_SUITES)  # 无重复
+    assert len(C.REQUIRED_ENVS) == len(C.LIBERO_TASK_SUITES)  # no duplicates
 
 
 def test_task_suite_order_matches_the_dispatched_env_list() -> None:
-    """派发给 worker 的 env_list 顺序，线上原样如此。"""
+    """The order of the env_list dispatched to the worker, exactly as it is in
+    production."""
     assert C.LIBERO_TASK_SUITES[0] == "libero_spatial"
     assert C.LIBERO_TASK_SUITES[-1] == "libero_spatial_swap"
 
@@ -109,8 +154,10 @@ def test_task_suite_order_matches_the_dispatched_env_list() -> None:
 
 
 def test_drand_chain_parameters() -> None:
-    """2026-08-17 对 https://api.drand.sh/<chain_hash>/info 实测核对过。
-    改任何一个都会让种子指向另一条链的随机数 —— 历史评测随即不可复现（spec §5）。
+    """Cross-checked against https://api.drand.sh/<chain_hash>/info on
+    2026-08-17. Changing any one of them makes the seed point at the randomness
+    of another chain — and historical evaluations immediately become
+    unreproducible (spec §5).
     """
     chain = C.DRAND_DEFAULT_CHAIN
     assert chain.chain_hash == (
@@ -122,10 +169,13 @@ def test_drand_chain_parameters() -> None:
 
 
 def test_chain_hash_has_no_second_copy_that_drifted() -> None:
-    """`seed.py` 目前另有一份同值的 `DRAND_CHAIN_HASH`（它拼 URL 要用）。
+    """`seed.py` currently holds a second `DRAND_CHAIN_HASH` with the same value
+    (it needs it to build the URL).
 
-    同一个常量两份手工副本，正是这个包存在要消灭的东西 —— `protocol/types.py` 当年
-    就是这么漂了 105 行的。在收敛成一处之前，这条断言负责让漂移当场变红。
+    Two hand-made copies of the same constant is exactly what this package exists
+    to eliminate — that is how `protocol/types.py` drifted by 105 lines back in
+    the day. Until they are collapsed into one place, this assertion is what
+    makes the drift go red on the spot.
     """
     from openroboto_protocol import seed
 
@@ -133,6 +183,7 @@ def test_chain_hash_has_no_second_copy_that_drifted() -> None:
 
 
 def test_drand_beacon_is_frozen() -> None:
-    """三个参数只能同时改，改不动比改错好。"""
+    """The three parameters can only be changed together; not being able to
+    change them beats changing them wrongly."""
     with pytest.raises(dataclasses.FrozenInstanceError):
         C.DRAND_DEFAULT_CHAIN.period_seconds = 3  # type: ignore[misc]

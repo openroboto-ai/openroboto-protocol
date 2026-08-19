@@ -1,13 +1,19 @@
-"""协议常量 —— 每一个都写清单位和量纲。
+"""Protocol constants — every one of them states its unit and its dimension.
 
-写单位不是洁癖。`CHAMPION_MARGIN` 的旧注释写成 `min avg_score margin to dethrone
-king (2%)`，值却是 `0.01`（avg_score 的绝对差值，不是百分比）。那个 "(2%)" 已经
-误导过一次。排放权重更狠：全仓有两套数字（0.07/0.02/0.01 与 0.70/0.20/0.10），
-没有任何一处说明它们是不同口径，看到哪份就以为是哪份。
+Writing down the unit is not fastidiousness. The old comment on
+`CHAMPION_MARGIN` read `min avg_score margin to dethrone king (2%)` while the
+value was `0.01` (an absolute difference in avg_score, not a percentage). That
+"(2%)" has already misled someone once. The emission weights are worse: the
+repo holds two sets of numbers (0.07/0.02/0.01 and 0.70/0.20/0.10) and nowhere
+says that they are measured differently, so whichever set you happen to see is
+the one you assume is real.
 
-**这个模块不负责**：运行时可调的后端参数。按 ADR 01，后端行为参数的唯一来源是
-`backend.yaml`，`control.json` 只承载 payment / dataset / training / process。
-这里放的是"两边必须有一致理解"的协议常量；`backend.yaml` 能覆盖的项会逐条注明。
+**What this module is not responsible for**: backend parameters that are
+tunable at runtime. Per ADR 01 the single source of backend behavior parameters
+is `backend.yaml`, and `control.json` only carries payment / dataset / training
+/ process. What lives here are the protocol constants that "both sides must
+understand identically"; every item that `backend.yaml` can override says so
+explicitly.
 """
 
 from __future__ import annotations
@@ -16,97 +22,161 @@ from dataclasses import dataclass
 from typing import Final
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 排放权重
+# Emission weights
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
 class EmissionWeights:
-    """Top-K 排放权重。**两种口径绑在一起，只能有一个输入。**
+    """Top-K emission weights. **Two ways of measuring the same thing, bound
+    together so that there can be only one input.**
 
-    同一件事全仓有两套数字，且没有任何地方说明它们的区别：
+    The repo holds two sets of numbers for the same thing, and nothing anywhere
+    explains the difference between them:
 
-    ===============================  ================================  ==========
-    数字                             口径                              是否生效
-    ===============================  ================================  ==========
-    ``[0.07, 0.02, 0.01]``           占**全网总排放**的绝对份额        **生效**
-    ``[0.70, 0.20, 0.10]``           Top-3 **之间**的相对分配          从未上线
-    ===============================  ================================  ==========
+    ========================  ====================================  ==============
+    Numbers                   Meaning                               In effect?
+    ========================  ====================================  ==============
+    ``[0.07, 0.02, 0.01]``    share of **total network emissions**  **in effect**
+    ``[0.70, 0.20, 0.10]``    relative split **among** the Top-3    never shipped
+    ========================  ====================================  ==============
 
-    数学上一致：``0.70 × (1 − 0.90 burn) = 0.07``。所以两者不是矛盾，是同一件事的
-    两种表达 —— 但混着用一定出事，因为 rank 1 拿 "0.7" 还是 "0.07" 差十倍。
+    Mathematically they agree: ``0.70 × (1 − 0.90 burn) = 0.07``. So the two are
+    not a contradiction, they are two expressions of the same thing — but mixing
+    them is guaranteed to blow up, because whether rank 1 gets "0.7" or "0.07"
+    is a factor of ten.
 
-    相对口径出现在 `owner/tools/round_controller.py:98` 生成的 control.json 里
-    （键名 ``emission_weights``）。2026-08-17 实测 https://api.openroboto.ai/control.json
-    **没有这个键** —— 它从未上线，链上排放一直走绝对口径。
+    The relative form appears in the control.json produced by
+    `owner/tools/round_controller.py:98` (under the key ``emission_weights``).
+    Measured on 2026-08-17, https://api.openroboto.ai/control.json **does not
+    have that key** — it never shipped, and on-chain emissions have always used
+    the absolute form.
 
-    这里只存绝对份额，相对份额和 burn 份额都是**算出来的**，因此永远对得上。
+    Only the absolute shares are stored here; the relative shares and the burn
+    share are both **computed**, so they can never disagree.
     """
 
-    #: rank 1..K 各自占全网总排放的份额。降序，和 < 1（差额被 burn 掉）。
-    #: 量纲：无量纲比例，1.0 = 全网总排放。
+    #: The share of total network emissions taken by each of ranks 1..K.
+    #: Descending, and the sum is < 1 (the remainder is burned).
+    #: Dimension: a dimensionless ratio, 1.0 = total network emissions.
     absolute: tuple[float, ...]
 
     @property
     def top_k(self) -> int:
-        """进榜名额。榜单长度就是权重条数 —— 不允许两个数各写一处。"""
+        """Number of slots on the board. The length of the board is exactly the
+        number of weights — the two numbers must not be written in two places."""
         return len(self.absolute)
 
     @property
     def relative(self) -> tuple[float, ...]:
-        """Top-K **之间**的相对分配（和为 1.0）。control.json 那套口径。"""
+        """The relative split **among** the Top-K (sums to 1.0). This is the
+        form used by control.json."""
         total = sum(self.absolute)
         return tuple(w / total for w in self.absolute)
 
     @property
     def burn_share(self) -> float:
-        """没进榜的那部分 —— 全部烧掉。量纲同 `absolute`。
+        """The part that did not make the board — all of it is burned. Same
+        dimension as `absolute`.
 
-        ⚠️ 这是**协议口径的推论**（1 − Top-K 之和）。生产实际写链时用的是
-        `backend.yaml` 的 `scanner.burn_ratio`（线上值 0.9）。两者当前一致；
-        真要改哪个都必须同时改另一个，否则权重和不为 1。
+        ⚠️ This is **an inference from the protocol's point of view** (1 − the
+        Top-K sum). What production actually uses when writing to chain is
+        `scanner.burn_ratio` from `backend.yaml` (live value 0.9). The two agree
+        today; if either one is ever changed the other must be changed at the
+        same time, otherwise the weights no longer sum to 1.
         """
         return 1.0 - sum(self.absolute)
 
 
-#: 生效口径的排放权重。**改这里就是改矿工到手的钱。**
+#: The emission weights in the form that is actually in effect.
+#: **Changing this is changing the money miners take home.**
 TOP_K_EMISSION: Final[EmissionWeights] = EmissionWeights(
     absolute=(0.07, 0.02, 0.01),
 )
 
-#: 兼容旧名（`protocol/types.py:82` 一直叫这个）。元组而非列表：常量不该可变。
+#: Compatibility with the old name (`protocol/types.py:82` has always called it
+#: this). A tuple rather than a list: constants should not be mutable.
 TOP_K_EMISSION_WEIGHTS: Final[tuple[float, ...]] = TOP_K_EMISSION.absolute
 
-#: 进榜名额（King of the Hill 的榜单长度）。与权重条数同源。
+#: Number of slots on the board (the length of the King of the Hill board).
+#: Same source as the number of weights.
 TOP_K: Final[int] = TOP_K_EMISSION.top_k
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 夺擂门槛
+# Dethroning threshold
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: 挑战者要夺擂，avg_score 必须 **严格大于** 擂主 + 这个值。
+#: For a challenger to dethrone the champion, its avg_score must be **strictly
+#: greater than** the champion's plus this value.
 #:
-#: 单位：avg_score 的**绝对差值**（avg_score 本身是 0..1 的 6 个 suite 均值），
-#: 所以 0.01 = 0.01 分，**不是 1%，更不是旧注释写的 "(2%)"**。
+#: Unit: an **absolute difference** in avg_score (avg_score itself is the mean
+#: over the 6 suites, each in 0..1), so 0.01 = 0.01 points, **not 1%, and even
+#: less the "(2%)" that the old comment claimed**.
 #:
-#: 比较符是严格大于，差值正好等于 margin 时挑战**失败**
-#: （`backend/db/rankings.py:224` 的 `chall_avg > target_avg + margin`）。
-#: 平局判失败是反抄袭的基石：复制擂主的权重只能打平，打平输在 margin 上。
-#: 任何一处写成 `>=` 都等于单方面拆掉这道门槛。
+#: The comparison is strictly greater than, so when the difference is exactly
+#: equal to the margin the challenge **fails**
+#: (`chall_avg > target_avg + margin` in `backend/db/rankings.py:224`).
+#: Deciding a tie against the challenger is the cornerstone of anti-plagiarism:
+#: copying the champion's weights can only tie, and a tie loses on the margin.
+#: Writing `>=` in any single place is a unilateral dismantling of this barrier.
 #:
-#: ⚠️ 运行时可被 `backend.yaml` 的 `ranking.champion_margin` 覆盖（线上值同为 0.01）。
-#: 这里是协议默认值；矿工据此估算能不能夺擂，两边不一致就是矿工白烧 TAO。
+#: ⚠️ Can be overridden at runtime by `ranking.champion_margin` in
+#: `backend.yaml` (the live value is also 0.01). This is the protocol default;
+#: miners use it to estimate whether they can dethrone the champion, and if the
+#: two sides disagree the miner burned TAO for nothing.
 CHAMPION_MARGIN: Final[float] = 0.01
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LIBERO 评测环境
+# Burn-to-commitment window
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: 一次评测要跑的 LIBERO task suite，顺序即派发给 worker 的 `env_list` 顺序。
-#: 2026-08-17 线上 117 条提交的 `env_list` 与 82 条出分记录的 `env_scores`
-#: 都恰好是这 6 个，一个不多一个不少。
+#: How many blocks may separate the burn transaction from the chain commitment.
+#:
+#: Unit: **blocks**, not seconds. At Bittensor's ~12 s block time this is about
+#: 10 minutes, but the check is on block numbers -- do not convert and compare
+#: time.
+#:
+#: The rule exists to stop burn replay: a fee paid once cannot be attached to a
+#: later submission, or to several. Exceeding the window is a **terminal
+#: rejection and the TAO is not refunded**, so both sides must agree on the
+#: number and on the comparison.
+#:
+#: Three details of the comparison are load-bearing, taken from the backend's
+#: `scanner/burn_verify.py:68-75`:
+#:
+#: 1. the distance is ``abs(burn_block - commit_block)`` -- **symmetric**; a burn
+#:    after the commitment counts just the same;
+#: 2. rejection is ``> window``, so a distance of exactly the window is
+#:    **accepted**. A consumer writing ``>=`` refuses submissions the backend
+#:    would have taken;
+#: 3. when either block number is 0 (unknown) the backend **skips the check
+#:    entirely**. A consumer that is stricter here rejects submissions that
+#:    would have been accepted.
+#:
+#: ⚠️ Can be overridden at runtime by `scanner.burn_block_window` in
+#: `backend.yaml`. The live value is also 50 (verified 2026-08-19: read by
+#: `backend/config.py:77`, enforced at `scanner/burn_verify.py:71`). Deployment
+#: docs claimed 10 for a long time; production behaviour is what settled it, and
+#: the miner-facing documents were corrected to 50.
+#:
+#: This lives here rather than in each consumer because it is exactly the kind of
+#: number that must not exist twice: the CLI warns the miner with it, the backend
+#: enforces with it, and if they ever disagree the miner burns TAO for a
+#: submission that was already doomed.
+BURN_BLOCK_WINDOW: Final[int] = 50
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LIBERO evaluation environments
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: The LIBERO task suites one evaluation has to run; the order is the order of
+#: the `env_list` dispatched to the worker.
+#: As of 2026-08-17, the `env_list` of the 117 live submissions and the
+#: `env_scores` of the 82 scoring records are all exactly these 6 — not one
+#: more, not one fewer.
 LIBERO_TASK_SUITES: Final[tuple[str, ...]] = (
     "libero_spatial",
     "libero_object",
@@ -116,47 +186,59 @@ LIBERO_TASK_SUITES: Final[tuple[str, ...]] = (
     "libero_spatial_swap",
 )
 
-#: 出分时必须齐全的环境。缺一个就整条拒收（`MISSING_ENVS`），任务保持原状态好让
-#: worker 重试 —— 3 个 suite 的均值和 6 个的均值不可比，混进同一张榜就是送分。
-#: 与 `LIBERO_TASK_SUITES` 同源：不存在"允许跑 6 个但只要求 4 个"这种半截配置。
+#: The environments that must all be present at scoring time. Missing one gets
+#: the whole thing rejected (`MISSING_ENVS`), and the task keeps its current
+#: status so the worker can retry — the mean over 3 suites and the mean over 6
+#: are not comparable, and mixing them into the same board is handing out free
+#: points.
+#: Same source as `LIBERO_TASK_SUITES`: there is no such half-configuration as
+#: "run 6 but only require 4".
 REQUIRED_ENVS: Final[frozenset[str]] = frozenset(LIBERO_TASK_SUITES)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# drand 随机信标
+# drand random beacon
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
 class DrandBeacon:
-    """drand 链的三个参数，绑成一条记录 —— 它们只能同时改。
+    """The three parameters of a drand chain, bound into one record — they can
+    only ever be changed together.
 
-    `genesis_time` 和 `period_seconds` 决定"某个时间点对应第几轮"，
-    `chain_hash` 决定"去哪条链取这一轮"。串了任意一个，算出来的 round 指向另一条链
-    的随机数，种子随之改变，而 **种子一变，历史评测就不可复现**（spec §5）。
-    分开写三个模块常量，就给了串用的机会。
+    `genesis_time` and `period_seconds` decide "which round a given point in
+    time corresponds to", and `chain_hash` decides "which chain that round is
+    fetched from". Cross any one of them and the round you compute points at a
+    random number on a different chain, the seed changes with it, and **once the
+    seed changes, historical evaluations are no longer reproducible** (spec §5).
+    Writing the three as separate module constants is what gives you the chance
+    to cross them.
     """
 
-    #: drand 链标识（也是 API 路径的一段）。
+    #: drand chain identifier (also a segment of the API path).
     chain_hash: str
-    #: 该链第 1 轮的 Unix 时间戳（秒）。
+    #: Unix timestamp (seconds) of round 1 of that chain.
     genesis_time: int
-    #: 出块周期（秒）。
+    #: Beacon period (seconds).
     period_seconds: int
 
 
-#: 生产使用的 drand 链：League of Entropy 默认链（beaconID `default`，
-#: schemeID `pedersen-bls-chained`）。
+#: The drand chain used in production: the League of Entropy default chain
+#: (beaconID `default`, schemeID `pedersen-bls-chained`).
 #:
-#: 2026-08-17 对 `https://api.drand.sh/<chain_hash>/info` 实测核对：
-#: period=30、genesis_time=1595431050、hash 一致。
+#: Checked against `https://api.drand.sh/<chain_hash>/info` on 2026-08-17:
+#: period=30, genesis_time=1595431050, and the hash matches.
 #:
-#: 轮次换算公式（`max(1, (ts - genesis) // period + 1)`）和取随机数的网络请求都
-#: **不在这个模块里** —— 前者属于 `seed.py`，后者是 I/O，属于后端。
+#: The round conversion formula (`max(1, (ts - genesis) // period + 1)`) and the
+#: network request that fetches the random number are both **not in this
+#: module** — the former belongs to `seed.py`, the latter is I/O and belongs to
+#: the backend.
 #:
-#: ⚠️ `seed.py` 目前另有一份同值的 `DRAND_CHAIN_HASH`（拼 URL 用）。同一个常量两份
-#: 副本正是这个包要消灭的东西；在收敛成一处之前，`tests/test_constants.py` 里有一条
-#: 断言盯着两者相等，漂了立刻变红。
+#: ⚠️ `seed.py` currently holds a second copy of `DRAND_CHAIN_HASH` with the
+#: same value (used to build the URL). Two copies of one constant is exactly
+#: what this package exists to eliminate; until they are converged into one
+#: place, `tests/test_constants.py` has an assertion watching that the two are
+#: equal, so it goes red the moment they drift.
 DRAND_DEFAULT_CHAIN: Final[DrandBeacon] = DrandBeacon(
     chain_hash="8990e7a9aaed2ffed73dbd7092123d6f289930540d7651336225dc172e51b2ce",
     genesis_time=1595431050,
