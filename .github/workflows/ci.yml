@@ -2,13 +2,19 @@ name: CI
 
 # 单分支：main 是唯一长期分支，功能走 PR。直推 main 也跑一遍 ——
 # 只在 PR 上触发的话，直推的改动一次检查都不会过。
-# tag 也跑：v1.0.0 打上去之前，构建产物必须先被验证过一次。
+#
+# tag **不在**这里触发，改由 release.yml 用 workflow_call 调进来 —— 发版必须
+# 等这套门槛全绿才允许 publish，而 `needs:` 跨不了 workflow。两边都挂 tag 触发
+# 的话同一个 tag 会把整套测试跑两遍，且其中一遍的结果没人看。
+#
+# workflow_call 意味着这个文件是**唯一**一份门槛定义。release.yml 里不许再抄
+# 一套"发版专用"的检查：抄出来的那套只会比这份弱，而且没人会同时维护两份。
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
-    tags: ["v*"]
+  workflow_call:
 
 permissions:
   contents: read
@@ -96,13 +102,11 @@ jobs:
       # 悄悄重新解析一遍 —— 那样 CI 装的和发版机器装的就不是同一套。
       - run: uv sync --locked
 
+      # 调脚本而不是在这里展开三条命令：本地 `bash scripts/lint.sh` 和 CI 跑的
+      # 必须是同一份，否则迟早出现"本地全绿、CI 红"，或者更糟 —— CI 那份悄悄比
+      # 本地弱。脚本里写了每个工具各管哪一段。
       - name: Lint
-        run: uv run ruff check .
-
-      # 只查 src：tests/ 里为了构造非法输入会故意传错类型，strict 下必然报错，
-      # 而那正是用例要验证的东西。
-      - name: Type check
-        run: uv run mypy src
+        run: bash scripts/lint.sh
 
       # --source=src 是必须的：不写的话 coverage 会把 pytest 自身也算进来，
       # 分母被稀释，100% 门槛就失去意义。
@@ -121,11 +125,14 @@ jobs:
   # 每次 PR 都跑，不是只在 tag 上跑 —— 打包坏了要在合并前知道，不是在
   # 发 1.0.0 的那一刻知道。
   #
-  # 这里**没有** uv publish，是故意的。发 PyPI 需要 trusted publisher 配置
-  # 加一次人工确认；接上之前，CI 只负责证明"包是能出的"。
+  # 这里依然**没有** uv publish：publish 需要 `id-token: write` 和一个带人工
+  # 审批的 environment，而这个 job 每个 PR 都跑。把发布放进来等于每个 PR 都要
+  # 有人去点审批，且 PR 分支上的代码拿到了 OIDC 权限。发布在 release.yml，
+  # 它 `uses:` 这个文件当门槛，再下载这个 job 传上去的 dist —— **发出去的就是
+  # 这里验过的那一份产物**，不是重新构建的另一份。
   # ───────────────────────────────────────────────────────────────────────────
   build:
-    name: build (no publish)
+    name: build (packaging gate; publish lives in release.yml)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [ci, golden-vectors]
@@ -155,6 +162,13 @@ jobs:
           echo "tag v${tag} matches pyproject version"
 
       - run: uv build
+
+      # PyPI 会在**上传时**拒收 metadata 有问题的包（最常见的是 README 渲染不了）。
+      # 那一刻 tag 已经推出去了，只能改代码重打一个版本号 —— 而版本号就是契约版本，
+      # 为了排版问题烧掉一个不是小事。twine check 把这条判断提前到 PR。
+      # uvx：一次性工具，不进 dev 依赖组，矿工和 CI 的环境都不用为它付代价。
+      - name: Metadata is uploadable
+        run: uvx twine check --strict dist/*
 
       # 零依赖承诺写在 wheel 的 METADATA 里，就在这里查，不靠自觉。
       # 带 `extra ==` 标记的依赖没问题 —— 那是消费方自己选装的（后端装
