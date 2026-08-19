@@ -190,13 +190,21 @@ git tag v1.0.1 && git push origin v1.0.1     发布的唯一动作
 
 ## 4. 约定
 
-- **语言：commit message 一律英文。** 注释与文档用中文，代码标识符 / 命令 /
-  字段名 / 包名保持英文。
-  - **为什么 commit 单独拿出来**：它是**跨仓、对外、且不可改**的那一层。
-    `git log` / `git blame` / PR 列表 / release notes 会被外部消费者读到
-    （矿工、评测方、外部验证者），而这几个仓有的已经公开、其余的上线时都要公开。
-    注释和文档改一次就好，commit message 改要重写历史。
-  - 正文（body）也是英文。可以引用中文文件名和中文标题（`docs/specs/07-worker契约组行为契约.md`），
+- **语言：看这个仓会不会公开。**
+  - **公开仓（`openroboto-protocol` · `openroboto-cli`）：注释、docstring、
+    commit message 全部英文。** 读它们的人不在团队里 —— 矿工、评测方、
+    外部验证者、以及任何 `pip install` 之后点进源码的人。
+    中文注释对他们等于没有注释，而这两个包的注释本身就是主要资产
+    （"为什么不能改回去" 那类信息，代码本身表达不了）。
+    ⚠️ 判据是**会不会公开**，不是**此刻是不是 public**：`openroboto-cli`
+    现在私有、上线时转公开，按公开写，免得到时候整仓重来一遍。
+  - **私有仓（`openroboto-backend`）：注释与文档用中文，commit message 仍然英文。**
+    读它的只有团队，中文的信息密度更高；而 commit 是跨仓、对外、且改不动的那一层
+    （`git log` / PR 列表 / release notes 会被外部消费者读到，改它要重写历史）。
+  - 三种仓都一样：代码标识符 / 命令 / 字段名 / 包名保持英文。
+  - commit 格式沿用 Conventional Commits：`type(scope): summary`。summary 用祈使句、
+    不超过 72 字符；body 讲**为什么**不是复述 diff。
+    可以引用中文文件名和中文标题（`docs/specs/07-worker契约组行为契约.md`），
     那是标识符不是叙述。
   - 格式沿用 Conventional Commits：`type(scope): summary`。summary 用祈使句、不超过
     72 字符；body 讲**为什么**不是复述 diff。

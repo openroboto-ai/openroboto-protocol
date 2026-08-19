@@ -1,33 +1,42 @@
-"""黄金向量：链上真实发生过的模型指纹与仓库结构。改一条就是改历史。
+"""Golden vectors: model fingerprints and repo structures that really happened on
+chain. Changing one of them means changing history.
 
-三个 fixture 都是生产提交的 HuggingFace 仓库树，2026-08-17 从
-``https://huggingface.co/api/models/<repo>/tree/<commit>?recursive=true`` 抓的，
-``<commit>`` 就是链上公告、生产 DB 里记着的那个 revision：
+All three fixtures are HuggingFace repo trees of production submissions, fetched
+on 2026-08-17 from
+``https://huggingface.co/api/models/<repo>/tree/<commit>?recursive=true``, where
+``<commit>`` is the very revision announced on chain and recorded in the
+production DB:
 
 - ``UID221_PYTORCH_TREE`` = uid 221 ``joseneto023dev/pi05-BRVeJ37DuryX@636dbaa3``
-  —— 2026-08-14 被误拒的两个提交之一，扁平的 openpi PyTorch checkpoint；
+  — one of the two submissions falsely rejected on 2026-08-14, a flat openpi
+  PyTorch checkpoint;
 - ``UID181_JAX_TREE`` = uid 181 ``OpenRd/pi05-vLUxPb8qTmGv@97da4275``
-  —— 仓库根就是 JAX orbax checkpoint；
+  — the repo root is itself a JAX orbax checkpoint;
 - ``UID130_NESTED_JAX_TREE`` = uid 130 ``swordswoman/pi05-j71bm5DVdD5X@ed38d896``
-  —— 10.8 GB，整棵树嵌在 ``merged/`` 下面。
+  — 10.8 GB, with the whole tree nested under ``merged/``.
 
-原样保留 ``type`` / ``size`` / ``path`` / ``lfs.oid`` 四项，去掉了判定用不到的
-git blob ``oid`` 与 ``xetHash``。
+The four items ``type`` / ``size`` / ``path`` / ``lfs.oid`` are kept verbatim;
+the git blob ``oid`` and ``xetHash``, which the verdict does not use, were
+dropped.
 
-期望指纹的来源
---------------
-每条 ``*_MODEL_HASH`` 都是**生产 PostgreSQL 导出**
-（``openroboto-backend/tests/fixtures/prod-data.sql``，round 1）里
-``submissions.model_hash`` 存着的值，不是我们现算的。
+Where the expected fingerprints come from
+-----------------------------------------
+Every ``*_MODEL_HASH`` is the value stored in ``submissions.model_hash`` in the
+**production PostgreSQL dump**
+(``openroboto-backend/tests/fixtures/prod-data.sql``, round 1); it is not
+something we computed just now.
 
-抽出这个模块时把导出里 37 条「hf_commit 是完整 40 位 sha」的提交全跑了一遍：
-**35 条逐字复现，0 条不一致**，另外 2 条的 revision 已经从 HF 上消失
-（``joseneto023dev/pi05-6YM1X5xNCoQZ@a252578b``、
-``joseneto023dev/pi05-aAxJBYQz5qqu@1a54a589`` → ``Invalid rev id``），
-它们**不能**进黄金向量 —— 输入没了，测试会永远红。
+While extracting this module, all 37 submissions in the dump whose "hf_commit is
+a full 40-character sha" were run through: **35 reproduced verbatim, 0
+mismatched**, and the revisions of the other 2 have disappeared from HF
+(``joseneto023dev/pi05-6YM1X5xNCoQZ@a252578b``,
+``joseneto023dev/pi05-aAxJBYQz5qqu@1a54a589`` → ``Invalid rev id``). Those 2
+**must not** go into the golden vectors — the inputs are gone, so the test would
+be red forever.
 
-这三棵树都通过了生产准入并进了评测队列，所以布局用例红了只有一种含义：
-新规则会拒真实矿工，禁止上线。
+All three trees passed production admission and entered the evaluation queue, so
+there is only one possible meaning when a layout case goes red: the new rule
+would reject real miners, and must not ship.
 """
 
 from __future__ import annotations
@@ -46,7 +55,8 @@ from openroboto_protocol.model_hash import model_hash_from_hf_tree
 def _tree(
     *entries: tuple[str, int, str] | tuple[str, int, str, str],
 ) -> list[dict[str, Any]]:
-    """把 (type, size, path[, lfs oid]) 还原成 HF tree API 的条目形状。"""
+    """Rebuild (type, size, path[, lfs oid]) into the entry shape of the HF tree
+    API."""
     out: list[dict[str, Any]] = []
     for entry in entries:
         node: dict[str, Any] = {"type": entry[0], "size": entry[1], "path": entry[2]}
@@ -57,7 +67,8 @@ def _tree(
 
 
 def _files(tree: list[dict[str, Any]]) -> list[CheckpointFile]:
-    """HF tree → 布局判定的输入。这段胶水故意留在调用方，不进协议包。"""
+    """HF tree → the input of the layout verdict. This glue is deliberately left
+    in the caller and does not go into the protocol package."""
     return [
         CheckpointFile(path=e["path"], size_bytes=e["size"])
         for e in tree
@@ -204,26 +215,31 @@ UID130_NESTED_JAX_TREE = _tree(
 UID130_MODEL_HASH = "d5ba20f63ec661af87f2a5c5c92ea8644f88f5b063dd5f30bd060d477d36ac5c"
 
 
-# ── 指纹：与生产 DB 里存着的 submissions.model_hash 逐字一致 ────────────────
+# ── Fingerprints: verbatim identical to submissions.model_hash stored in the
+#    production DB ──────────────────────────────────────────────────────────
 
 
 def test_uid221_model_hash() -> None:
-    """单个 LFS 权重文件。HF 只给 ``lfs.oid``，不给 ``lfs.sha256``。"""
+    """A single LFS weights file. HF only gives ``lfs.oid``, not
+    ``lfs.sha256``."""
     assert model_hash_from_hf_tree(UID221_PYTORCH_TREE) == UID221_MODEL_HASH
 
 
 def test_uid181_model_hash() -> None:
-    """4 个 LFS 分片；同目录下另有 6 个非 LFS 小文件，它们不进指纹。"""
+    """4 LFS shards; the same directory also holds 6 small non-LFS files, which
+    do not go into the fingerprint."""
     assert model_hash_from_hf_tree(UID181_JAX_TREE) == UID181_MODEL_HASH
 
 
 def test_uid130_model_hash() -> None:
-    """8 个 LFS 分片 —— 排序合并这一步只有多文件时才验得到。"""
+    """8 LFS shards — the sort-and-join step can only be verified with multiple
+    files."""
     assert model_hash_from_hf_tree(UID130_NESTED_JAX_TREE) == UID130_MODEL_HASH
 
 
 def test_model_hash_is_independent_of_listing_order() -> None:
-    """同一份权重换个上传/返回顺序必须得到同一个指纹，否则重传一次就能洗白抄袭。"""
+    """The same weights in a different upload/return order must give the same
+    fingerprint, otherwise re-uploading once would launder plagiarism."""
     assert (
         model_hash_from_hf_tree(list(reversed(UID130_NESTED_JAX_TREE)))
         == UID130_MODEL_HASH
@@ -231,7 +247,8 @@ def test_model_hash_is_independent_of_listing_order() -> None:
 
 
 def test_model_hash_ignores_non_lfs_files() -> None:
-    """改 ``round_info.json`` 这类元数据换不掉指纹 —— 抄袭者改元数据逃不掉。"""
+    """Editing metadata such as ``round_info.json`` does not change the
+    fingerprint — a plagiarist cannot escape by editing metadata."""
     tampered = [
         {**e, "size": e["size"] + 1} if e["path"].endswith("round_info.json") else e
         for e in UID130_NESTED_JAX_TREE
@@ -240,15 +257,18 @@ def test_model_hash_ignores_non_lfs_files() -> None:
 
 
 def test_different_weights_give_different_model_hash() -> None:
-    """三个仓库两两不同 —— 指纹撞了就会被判抄袭，撞错人代价是别人的钱。"""
+    """The three repos are pairwise different — a fingerprint collision means a
+    plagiarism verdict, and colliding with the wrong person costs somebody else
+    their money."""
     assert len({UID221_MODEL_HASH, UID181_MODEL_HASH, UID130_MODEL_HASH}) == 3
 
 
-# ── 布局准入：这三个仓库在生产里都被放行过 ─────────────────────────────────
+# ── Layout admission: all three repos were let through in production ──────
 
 
 def test_uid221_layout_accepted() -> None:
-    """2026-08-14 被误拒的提交必须通过。``.gitattributes`` 是 HF 自动生成的。"""
+    """The submission falsely rejected on 2026-08-14 must pass.
+    ``.gitattributes`` is generated automatically by HF."""
     report = check_checkpoint_layout(_files(UID221_PYTORCH_TREE))
     assert report.ok, report.errors
     assert report.kind is CheckpointKind.PYTORCH
@@ -264,9 +284,11 @@ def test_uid181_layout_accepted() -> None:
 
 
 def test_uid130_nested_layout_accepted() -> None:
-    """整棵 checkpoint 嵌在 ``merged/`` 下面，仍是合法提交。
+    """The whole checkpoint is nested under ``merged/``, and it is still a legal
+    submission.
 
-    嵌套 1 层，在评测器能搜到的 2 层以内，所以不该有 warning。
+    Nested by 1 level, within the 2 levels the evaluator can search, so there
+    should be no warning.
     """
     report = check_checkpoint_layout(_files(UID130_NESTED_JAX_TREE))
     assert report.ok, report.errors
@@ -275,7 +297,8 @@ def test_uid130_nested_layout_accepted() -> None:
 
 
 def test_real_repo_without_norm_stats_is_rejected() -> None:
-    """同一个真实仓库，去掉 norm_stats 就必须被拒 —— 准入不是走过场。"""
+    """The same real repo must be rejected once norm_stats is removed —
+    admission is not a formality."""
     stripped = [
         f for f in _files(UID221_PYTORCH_TREE) if not f.path.endswith("norm_stats.json")
     ]

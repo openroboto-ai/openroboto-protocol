@@ -1,74 +1,94 @@
-"""链上 commitment payload 的编解码 —— 矿工写、后端读，双方必须逐字节一致。
+"""Encoding and decoding of the on-chain commitment payload — miners write it,
+the backend reads it, and the two sides must agree byte for byte.
 
-矿工把一次提交的元数据 JSON 塞进 Bittensor 的 `Commitments.set_commitment`
-（`Data::BigRaw`），后端扫链读回来。**这一个 JSON 就是提交本身** —— 它决定
-哪个 HF 仓库被评测、算哪一轮、拿哪笔 burn 交易去核对。编码端和解码端对不上，
-矿工就是烧了 TAO 没人看见。
+A miner stuffs the metadata JSON of one submission into Bittensor's
+`Commitments.set_commitment` (`Data::BigRaw`), and the backend scans the chain
+and reads it back. **This one JSON is the submission itself** — it decides
+which HF repo gets evaluated, which round it counts for, and which burn
+transaction is used to check it. If the encoding side and the decoding side
+disagree, the miner burned TAO and nobody saw it.
 
-## 链上 JSON 的形状
+## The shape of the on-chain JSON
 
-键名压到一个字母不是为了好看：`Data::BigRaw` 上限 512 字节，一个 hf_repo_id
-加两个 64 位十六进制哈希已经吃掉一半。改键名 = major。
+The key names are squeezed down to one letter not for looks: `Data::BigRaw` has
+a hard limit of 512 bytes, and one hf_repo_id plus two 64-character hex hashes
+already eat half of it. Changing a key name = major.
 
-| 键 | 字段 | 契约含义 |
+| Key | Field | Contract meaning |
 |---|---|---|
-| `s` | `hotkey_ss58` | 矿工 hotkey，SS58 全串 |
-| `h` | `block_hash` | **矿工自报的**提交区块哈希，不可信，见下 |
-| `c` | `hf_commit` | HuggingFace commit SHA，40 位十六进制 |
-| `r` | `round_num` | 轮次号 |
-| `i` | `hf_repo_id` | HuggingFace 仓库 id，如 `kyleab/pi05-scmGbsBoEmiQ` |
-| `b` | `burn_tx_hash` | burn 交易哈希，**链上不带 `0x`** |
-| `bb` | `burn_block` | burn 所在区块；0 时编码成 `null` |
+| `s` | `hotkey_ss58` | miner hotkey, full SS58 string |
+| `h` | `block_hash` | submission block hash, **self-reported**, untrusted, see below |
+| `c` | `hf_commit` | HuggingFace commit SHA, 40 hex characters |
+| `r` | `round_num` | round number |
+| `i` | `hf_repo_id` | HuggingFace repo id, e.g. `kyleab/pi05-scmGbsBoEmiQ` |
+| `b` | `burn_tx_hash` | burn transaction hash, **stored on chain without `0x`** |
+| `bb` | `burn_block` | the block the burn is in; encoded as `null` when it is 0 |
 
-## 两个必须记住的不对称
+## Two asymmetries that must be remembered
 
-1. **`h` 是矿工自报的，不能直接喂给种子派生。** 扫链方拿到 `commit_block`
-   之后必须用 `get_block_hash(commit_block)` 覆盖它 —— 链给的那个带 `0x`，
-   矿工自报的那个不带。而 `derive_seed()` 是对字符串做 sha256，
-   多两个字符就是另一个种子、另一批评测任务。本模块**原样返回**矿工自报值
-   （不补 `0x`），覆盖是调用方的责任。
-2. **`b` 反过来：解码时补 `0x`，编码时去 `0x`。** 生产两个消费方
-   （backend/chain_scanner.py、scripts/seed_data.py）都这么做，去重键依赖它。
+1. **`h` is self-reported by the miner and must not be fed straight into seed
+   derivation.** Once the chain scanner has `commit_block` it must overwrite it
+   with `get_block_hash(commit_block)` — the one the chain gives has the `0x`,
+   the one the miner self-reports does not. And `derive_seed()` takes a sha256
+   of a string, so two extra characters mean a different seed and a different
+   set of evaluation tasks. This module **returns the miner's self-reported
+   value as-is** (it does not add `0x`); overwriting it is the caller's
+   responsibility.
+2. **`b` goes the other way: decoding adds `0x`, encoding strips `0x`.** Both
+   production consumers (backend/chain_scanner.py, scripts/seed_data.py) do it
+   this way, and the deduplication key depends on it.
 
-## 变体名是长度，不是版本号
+## The variant name is a length, not a version number
 
-SDK 回来的字段键长这样：`BigRaw` / `Raw119` / `Raw82`。`RawN` 里的 N 是
-**字节数**，128 字节以内用 `RawN`，超了才用 `BigRaw`。它不携带任何客户端版本信息。
+The field keys that come back from the SDK look like this: `BigRaw` / `Raw119`
+/ `Raw82`. The N in `RawN` is the **number of bytes**; up to 128 bytes it is
+`RawN`, and only beyond that is it `BigRaw`. It carries no client version
+information whatsoever.
 
-2026-08 的结论「UID 71 四次提交三次是 Raw119，旧版 rt.py 走了 Raw 分支」是误判。
-链上原始数据（Taostats extrinsic API，2026-08-17 复核）：
+The 2026-08 conclusion that "three of UID 71's four submissions were Raw119, so
+the old rt.py took the Raw branch" was a misjudgement. The raw on-chain data
+(Taostats extrinsic API, re-checked 2026-08-17):
 
-    8797897  Raw119  netuid=126   ← 别的子网
-    8808332  BigRaw  netuid=80    ← 本子网，后端正常解出
-    8830097  Raw119  netuid=126   ← 别的子网
-    8830168  Raw119  netuid=126   ← 别的子网
+    8797897  Raw119  netuid=126   ← a different subnet
+    8808332  BigRaw  netuid=80    ← this subnet, decoded normally by the backend
+    8830097  Raw119  netuid=126   ← a different subnet
+    8830168  Raw119  netuid=126   ← a different subnet
 
-同一个 hotkey 在多个子网上都发 commitment；那三条 Raw119 是 netuid 126 的
-二进制 payload，本来就不该被 netuid 80 的后端看见。误判的根因是 Taostats
-的 `netuid` 查询参数**被静默忽略**（实测：带 `netuid=80` 仍返回 123/126/68/47
-等子网的记录），离线分析脚本按 signer_address 拉数据时把别的子网算进来了。
-矿工没有白烧 TAO。
+The same hotkey posts commitments on several subnets; those three Raw119
+records are netuid 126's binary payloads, which the netuid 80 backend was never
+supposed to see in the first place. The root cause of the misjudgement is that
+Taostats **silently ignores** the `netuid` query parameter (measured: passing
+`netuid=80` still returns records from subnets 123/126/68/47 and others), so an
+offline analysis script pulling data by signer_address counted other subnets in.
+The miner did not burn TAO for nothing.
 
-因此本模块**不为 `Raw119` 做任何特殊处理**：任何 `Raw*` / `BigRaw` 变体都按同一套
-JSON 解，解不出来时用 `DecodeFailure` 说清楚是哪一类，把变体名一并带回给调用方
-记日志。真正的版本漂移信号是 `UNKNOWN_SCHEMA`（是 JSON 对象但一个已知键都没有），
-不是变体名。
+Therefore this module does **no special handling for `Raw119`**: every `Raw*` /
+`BigRaw` variant is decoded with the same JSON rules, and when decoding fails
+`DecodeFailure` says which class of failure it was and carries the variant name
+back to the caller for logging. The real signal of version drift is
+`UNKNOWN_SCHEMA` (it is a JSON object but not a single known key appears in
+it), not the variant name.
 
-## 不负责什么
+## What it is not responsible for
 
-不碰链、不查 netuid、不做 burn 校验、不覆盖 `h`、不判断轮次是否当期 ——
-那些都要 I/O 或后端配置，留在调用方。
+It does not touch the chain, does not look up netuid, does not verify the burn,
+does not overwrite `h`, and does not decide whether a round is the current one
+— all of those need I/O or backend configuration and stay in the caller.
 
-## 谁消费它
+## Who consumes it
 
-* 矿工 CLI（`rt.py` / `openroboto submit`）—— `encode()`，烧 TAO 之前调；
-* 后端扫链器 —— `decode()`，`get_commitment_metadata()` 的返回直接喂进来；
-* 历史回填脚本 —— `decode()`，喂索引器返回的 `__kind`/`value` 形状。
+* the miner CLI (`rt.py` / `openroboto submit`) — `encode()`, called before
+  burning TAO;
+* the backend chain scanner — `decode()`, the return value of
+  `get_commitment_metadata()` is fed straight in;
+* the historical backfill script — `decode()`, fed the `__kind`/`value` shape
+  returned by the indexer.
 
-## 最小验证
+## Minimal verification
 
-`uv run pytest tests/test_commitment.py` —— 其中 GV-1 是链上区块 8808332
-那 295 个真实字节，编解码互为逆运算这条一旦红，就是格式漂了。
+`uv run pytest tests/test_commitment.py` — GV-1 in there is the 295 real bytes
+of on-chain block 8808332, and the moment "encode and decode are inverses of
+each other" goes red, the format has drifted.
 """
 
 from __future__ import annotations
@@ -79,46 +99,58 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
 
-# `Data::BigRaw` 的硬上限。超过这个长度的 extrinsic 会被链拒绝 ——
-# 而 burn 是在提交之前就花掉的，所以必须在花钱之前发现。
+# The hard limit of `Data::BigRaw`. An extrinsic longer than this is rejected by
+# the chain — and the burn is spent before the submission, so it must be caught
+# before the money is spent.
 MAX_COMMITMENT_BYTES: Final = 512
 
-# 链上 JSON 的全部已知键。解码时「一个都不认识」= 对方不是本协议的客户端。
+# All known keys of the on-chain JSON. At decode time, "not one of them is
+# recognized" = the other side is not a client of this protocol.
 PAYLOAD_KEYS: Final = ("s", "h", "c", "r", "i", "b", "bb")
 
 
 class DecodeFailure(StrEnum):
-    """解码失败的分类 —— 调用方靠它区分「噪音」和「真出事了」。
+    """Classification of decode failures — the caller uses it to tell "noise"
+    apart from "something actually broke".
 
-    生产实测（2026-08-14，3000 行扫链日志）：772 条解码失败里 768 条是
-    `NO_COMMITMENT`（该 hotkey 链上根本没提交过），4 条是 `NOT_UTF8`
-    （别的子网的二进制 payload）。旧扫链器把这两类和真故障一起打成
-    `decode FAILED` WARNING，于是 768 条噪音把真信号埋了。
+    Measured in production (2026-08-14, 3000 lines of chain-scan logs): of 772
+    decode failures, 768 were `NO_COMMITMENT` (that hotkey never submitted
+    anything on chain at all) and 4 were `NOT_UTF8` (binary payloads from other
+    subnets). The old scanner logged both of these classes together with real
+    faults as a `decode FAILED` WARNING, so 768 lines of noise buried the real
+    signal.
     """
 
     NO_COMMITMENT = "no_commitment"
-    """链上没有这条 commitment：`None`、空串、或 `info.fields` 里没有可用字段。
-    这是**正常状态**，不是错误 —— 绝大多数 hotkey 从没提交过。"""
+    """There is no such commitment on chain: `None`, an empty string, or no
+    usable field in `info.fields`.
+    This is a **normal state**, not an error — the vast majority of hotkeys
+    have never submitted anything."""
 
     NOT_HEX = "not_hex"
-    """字段值声明成 `0x...` 但不是合法十六进制。"""
+    """The field value declares itself as `0x...` but is not valid
+    hexadecimal."""
 
     NOT_UTF8 = "not_utf8"
-    """字节流不是 UTF-8。基本可以断定是别的子网的二进制 payload。"""
+    """The byte stream is not UTF-8. It is safe to conclude it is a binary
+    payload from another subnet."""
 
     NOT_JSON = "not_json"
-    """是 UTF-8 文本但不是合法 JSON。"""
+    """It is UTF-8 text but not valid JSON."""
 
     NOT_OBJECT = "not_object"
-    """是合法 JSON 但顶层不是对象（比如是数组或数字）。"""
+    """It is valid JSON but the top level is not an object (an array or a
+    number, say)."""
 
     UNKNOWN_SCHEMA = "unknown_schema"
-    """是 JSON 对象，但 `PAYLOAD_KEYS` 一个都不出现。
-    **这才是客户端版本漂移的真信号** —— 对方在用一套我们不认识的键名。"""
+    """It is a JSON object, but not a single one of `PAYLOAD_KEYS` appears.
+    **This is the real signal of client version drift** — the other side is
+    using a set of key names we do not know."""
 
 
 class CommitmentDecodeError(ValueError):
-    """解码失败。`reason` 用于分类统计，`detail` 用于人读。"""
+    """Decoding failed. `reason` is for classification statistics, `detail` is
+    for humans to read."""
 
     def __init__(self, reason: DecodeFailure, detail: str = "") -> None:
         super().__init__(f"{reason.value}: {detail}" if detail else reason.value)
@@ -127,10 +159,12 @@ class CommitmentDecodeError(ValueError):
 
 
 class CommitmentTooLargeError(ValueError):
-    """编码结果超过 `MAX_COMMITMENT_BYTES`，这条 commitment 上不了链。
+    """The encoded result exceeds `MAX_COMMITMENT_BYTES`, so this commitment
+    cannot go on chain.
 
-    必须在矿工烧 TAO **之前**抛出：burn 先发生、提交后发生，
-    提交失败不会把钱退回来。实际唯一可能撑爆的字段是 `hf_repo_id`。
+    It must be raised **before** the miner burns TAO: the burn happens first
+    and the submission second, and a failed submission does not give the money
+    back. In practice the only field that can blow the limit is `hf_repo_id`.
     """
 
     def __init__(self, size: int) -> None:
@@ -143,73 +177,92 @@ class CommitmentTooLargeError(ValueError):
 
 @dataclass(frozen=True)
 class CommitmentPayload:
-    """一次提交的全部链上字段 —— 必须同源，所以绑成一个不可变整体。
+    """All the on-chain fields of one submission — they must come from the same
+    source, so they are bound into one immutable whole.
 
-    拆开传参数会让「这个 block_hash 配那个 burn_tx_hash」变成可能，
-    而这两者一旦错配，seed 和 burn 校验会各自指向不同的提交。
+    Passing them as separate arguments would make "this block_hash with that
+    burn_tx_hash" possible, and once those two are mismatched the seed and the
+    burn check point at two different submissions.
     """
 
     hotkey_ss58: str
-    """矿工 hotkey（SS58）。链上 `s`。"""
+    """Miner hotkey (SS58). On chain: `s`."""
 
     block_hash: str
-    """**矿工自报的**提交区块哈希，链上 `h`，不带 `0x`。
+    """The submission block hash **as self-reported by the miner**, on chain
+    `h`, without the `0x`.
 
-    ⚠️ 不可信。扫链方必须用 `get_block_hash(commit_block)` 覆盖之后
-    再拿去派生种子，否则矿工可以自选种子。"""
+    ⚠️ Untrusted. The chain scanner must overwrite it with
+    `get_block_hash(commit_block)` before it is used to derive the seed,
+    otherwise miners can pick their own seed."""
 
     hf_commit: str
-    """HuggingFace commit SHA，链上 `c`，40 位十六进制。
-    生产上出现过空值（矿工没填 commit URL），本模块不拦，由后端 HF 校验拒。"""
+    """HuggingFace commit SHA, on chain `c`, 40 hex characters.
+    Empty values have occurred in production (the miner did not fill in the
+    commit URL); this module does not block it, the backend's HF check
+    rejects it."""
 
     round_num: int
-    """轮次号，链上 `r`。缺失按 0 处理 —— 0 永远不等于当期轮次，会被后端拒掉。"""
+    """Round number, on chain `r`. When missing it is treated as 0 — 0 is never
+    equal to the current round, so it gets rejected by the backend."""
 
     hf_repo_id: str
-    """HuggingFace 仓库 id，链上 `i`，如 `kyleab/pi05-scmGbsBoEmiQ`。"""
+    """HuggingFace repo id, on chain `i`, e.g. `kyleab/pi05-scmGbsBoEmiQ`."""
 
     burn_tx_hash: str
-    """burn 交易哈希，链上 `b`。
+    """Burn transaction hash, on chain `b`.
 
-    链上存的**不带** `0x`；`decode()` 解出来时补上 `0x`，`encode()` 写回时去掉。
-    去重键（hotkey + round + burn_tx_hash）依赖这个规范化形式。"""
+    What is stored on chain does **not** have the `0x`; `decode()` adds `0x`
+    when it decodes and `encode()` strips it when it writes back. The
+    deduplication key (hotkey + round + burn_tx_hash) depends on this
+    normalized form."""
 
     burn_block: int
-    """burn 所在区块，链上 `bb`。0 表示矿工没报，编码时写成 `null`。"""
+    """The block the burn is in, on chain `bb`. 0 means the miner did not report
+    it, and it is written as `null` when encoding."""
 
 
 @dataclass(frozen=True)
 class DecodedCommitment:
-    """`decode()` 的结果：矿工自报的 payload + 链信封给的、可信的那部分。
+    """The result of `decode()`: the payload self-reported by the miner, plus
+    the trustworthy part that the chain envelope provides.
 
-    两者分开放是因为信任级别不同：`payload` 全是矿工写的，
-    `commit_block` 是链节点返回的。
+    The two are kept apart because their trust levels differ: everything in
+    `payload` was written by the miner, whereas `commit_block` was returned by
+    the chain node.
     """
 
     payload: CommitmentPayload
-    """矿工写在链上的那个 JSON。全部字段都是自报值。"""
+    """The JSON the miner wrote on chain. Every field is a self-reported
+    value."""
 
     commit_block: int
-    """commitment 所在区块号，来自链返回的元数据信封（可信）。
-    调用方拿它去 `get_block_hash()` 换真区块哈希。输入里没有信封时为 0。"""
+    """The number of the block containing the commitment, from the metadata
+    envelope returned by the chain (trustworthy).
+    The caller takes it to `get_block_hash()` to exchange it for the real block
+    hash. It is 0 when the input has no envelope."""
 
     data_variant: str
-    """SDK 报出的 `Data` 变体名：`BigRaw` / `Raw119` / …。
+    """The `Data` variant name reported by the SDK: `BigRaw` / `Raw119` / ….
 
-    只是**字节长度标签**，不是版本号（见模块 docstring）。带回来是为了让
-    调用方能在日志里看见形状变化，不要拿它做分支判断。
-    直接传字节或 dict 时为空串。"""
+    It is only a **byte-length label**, not a version number (see the module
+    docstring). It is carried back so that the caller can see shape changes in
+    the logs; do not branch on it.
+    Empty string when bytes or a dict were passed directly."""
 
 
 def encode(payload: CommitmentPayload) -> bytes:
-    """把 payload 编成上链的字节。键序和分隔符是契约的一部分，不能改。
+    """Encode the payload into the bytes that go on chain. The key order and
+    the separators are part of the contract and must not be changed.
 
-    `json.dumps(separators=(",", ":"))` 的紧凑形式 + 固定键序 `s,h,c,r,i,b,bb`
-    是链上历史数据的既成事实（见 tests/test_golden_vectors.py）。
-    换个键序不会解码失败，但字节不再一致 —— 任何按字节比对的核对都会炸。
+    The compact form of `json.dumps(separators=(",", ":"))` plus the fixed key
+    order `s,h,c,r,i,b,bb` is an established fact of the historical on-chain
+    data (see tests/test_golden_vectors.py). A different key order would not
+    fail to decode, but the bytes would no longer match — and any check that
+    compares byte by byte would blow up.
 
-    超过 512 字节抛 `CommitmentTooLargeError`：这样的 payload 上不了链，
-    而矿工此时已经烧过 TAO 了。
+    Beyond 512 bytes it raises `CommitmentTooLargeError`: such a payload cannot
+    go on chain, and by that point the miner has already burned TAO.
     """
     data = {
         "s": payload.hotkey_ss58,
@@ -218,7 +271,7 @@ def encode(payload: CommitmentPayload) -> bytes:
         "r": payload.round_num,
         "i": payload.hf_repo_id,
         "b": _strip_0x(payload.burn_tx_hash),
-        # 0 写成 null 是历史形状，不是笔误。
+        # Writing 0 as null is the historical shape, not a typo.
         "bb": payload.burn_block or None,
     }
     blob = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -228,19 +281,24 @@ def encode(payload: CommitmentPayload) -> bytes:
 
 
 def decode(raw: object) -> DecodedCommitment:
-    """把扫链拿到的东西解成 `DecodedCommitment`，失败抛 `CommitmentDecodeError`。
+    """Decode whatever the chain scan produced into a `DecodedCommitment`;
+    raise `CommitmentDecodeError` on failure.
 
-    接受 SDK 实际会返回的全部形状（生产上一个都不能少）：
+    It accepts every shape the SDK actually returns (in production not one of
+    them can be left out):
 
-    * `bytes` / `str` —— 已经是 payload 本身；
+    * `bytes` / `str` — already the payload itself;
     * `{"deposit":…, "block": N, "info": {"fields": [{"BigRaw": …}]}}`
-      —— `get_commitment_metadata()` 的返回；字段值可能是 JSON 文本、
-      `0x` 十六进制串、或整数元组，取决于 SDK 版本；
-    * `{"__kind": "BigRaw", "value": "0x…"}` —— 索引器（Taostats/subsquid）的形状；
-    * 直接就是 payload 的 dict —— 老代码的兜底路径。
+      — the return value of `get_commitment_metadata()`; the field value may be
+      JSON text, a `0x` hex string, or a tuple of integers, depending on the
+      SDK version;
+    * `{"__kind": "BigRaw", "value": "0x…"}` — the shape used by indexers
+      (Taostats/subsquid);
+    * the payload dict itself — the fallback path for old code.
 
-    只取**第一个**可用的 `Raw*` / `BigRaw` 字段。链上一次 commitment 就一个字段，
-    出现多个说明形状已经不是我们认识的了，与其猜不如让上面那条报出来。
+    Only the **first** usable `Raw*` / `BigRaw` field is taken. One commitment
+    on chain has exactly one field, and several of them means the shape is no
+    longer one we recognize; rather than guess, let the check above report it.
     """
     if raw is None:
         raise CommitmentDecodeError(DecodeFailure.NO_COMMITMENT, "raw is None")
@@ -251,7 +309,8 @@ def decode(raw: object) -> DecodedCommitment:
         return DecodedCommitment(_payload_from_bytes(bytes(raw)), 0, "")
 
     if isinstance(raw, str):
-        # 生产实测：没有 commitment 的 hotkey，SDK 返回的是空串而不是 None。
+        # Measured in production: for a hotkey with no commitment, the SDK
+        # returns an empty string rather than None.
         if not raw:
             raise CommitmentDecodeError(DecodeFailure.NO_COMMITMENT, "empty string")
         return DecodedCommitment(_payload_from_bytes(raw.encode("utf-8")), 0, "")
@@ -264,7 +323,8 @@ def decode(raw: object) -> DecodedCommitment:
                 return DecodedCommitment(
                     _payload_from_bytes(blob), commit_block, variant
                 )
-        # 兜底：信封里没有字段，但这个 dict 自己就长得像 payload。
+        # Fall back: the envelope has no field, but this dict itself looks like
+        # a payload.
         if _has_known_key(raw):
             return DecodedCommitment(_payload_from_mapping(raw), commit_block, "")
         raise CommitmentDecodeError(
@@ -276,7 +336,7 @@ def decode(raw: object) -> DecodedCommitment:
     )
 
 
-# ─── 内部实现 ────────────────────────────────────────────────
+# ─── Internal implementation ─────────────────────────────────
 
 
 def _strip_0x(value: str) -> str:
@@ -284,12 +344,13 @@ def _strip_0x(value: str) -> str:
 
 
 def _as_str(value: object) -> str:
-    """非字符串一律当空 —— 矿工写了 `"i": 123` 这种，后端 HF 校验会拒。"""
+    """Anything that is not a string counts as empty — a miner writing
+    `"i": 123` gets rejected by the backend's HF check."""
     return value if isinstance(value, str) else ""
 
 
 def _as_int(value: object, default: int = 0) -> int:
-    """`None` / 非数字 → default。链上 `bb` 缺省就是 `null`。"""
+    """`None` / non-numeric → default. On chain, `bb` defaults to `null`."""
     if isinstance(value, bool):
         return default
     if isinstance(value, int):
@@ -307,9 +368,10 @@ def _has_known_key(data: Mapping[Any, Any]) -> bool:
 
 
 def _iter_data_fields(raw: Mapping[Any, Any]) -> Iterator[tuple[str, object]]:
-    """从链信封里掏出 (变体名, 字段值)。
+    """Dig (variant name, field value) out of the chain envelope.
 
-    `info.fields` 在不同 SDK 版本里是 `[{...}]` 或 `[[{...}]]`，两层都要认。
+    Across SDK versions `info.fields` is either `[{...}]` or `[[{...}]]`, and
+    both levels have to be accepted.
     """
     info = raw.get("info")
     if not isinstance(info, Mapping):
@@ -324,24 +386,26 @@ def _iter_data_fields(raw: Mapping[Any, Any]) -> Iterator[tuple[str, object]]:
         for entry in entries:
             if not isinstance(entry, Mapping):
                 continue
-            # 索引器形状：{"__kind": "BigRaw", "value": "0x…"}
+            # Indexer shape: {"__kind": "BigRaw", "value": "0x…"}
             kind = entry.get("__kind")
             if isinstance(kind, str) and _is_data_variant(kind):
                 yield kind, entry.get("value")
                 continue
-            # SDK 形状：{"BigRaw": …}
+            # SDK shape: {"BigRaw": …}
             for key, value in entry.items():
                 if isinstance(key, str) and _is_data_variant(key):
                     yield key, value
 
 
 def _is_data_variant(key: str) -> bool:
-    """`RawN`（N = 字节数，≤128）或 `BigRaw`（>128）。N 不是版本号。"""
+    """`RawN` (N = number of bytes, ≤128) or `BigRaw` (>128). N is not a version
+    number."""
     return key == "BigRaw" or key.startswith("Raw")
 
 
 def _field_bytes(value: object) -> bytes | None:
-    """把字段值还原成字节。认不出来返回 `None`（继续看下一个字段）。"""
+    """Restore a field value back to bytes. Return `None` when it is not
+    recognized (and go on to the next field)."""
     if isinstance(value, bytes | bytearray):
         return bytes(value)
     if isinstance(value, str):
@@ -386,13 +450,15 @@ def _payload_from_bytes(blob: bytes) -> CommitmentPayload:
 
 
 def _payload_from_mapping(data: Mapping[Any, Any]) -> CommitmentPayload:
-    """缺键一律走默认值 —— minor 版本加了新键的老数据必须还能解出来。"""
+    """A missing key always falls back to the default value — old data from
+    before a minor version added a new key must still decode."""
     burn_tx_hash = _as_str(data.get("b"))
     if burn_tx_hash and not burn_tx_hash.startswith("0x"):
         burn_tx_hash = f"0x{burn_tx_hash}"
     return CommitmentPayload(
         hotkey_ss58=_as_str(data.get("s")),
-        # 不补 0x：矿工自报值原样返回，见模块 docstring 的不对称说明。
+        # No `0x` is added: the miner's self-reported value is returned as-is,
+        # see the asymmetry note in the module docstring.
         block_hash=_as_str(data.get("h")),
         hf_commit=_as_str(data.get("c")),
         round_num=_as_int(data.get("r")),

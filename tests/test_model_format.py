@@ -1,7 +1,9 @@
-"""``model_format`` 的边界行为。真实矿工仓库在 ``test_model_golden_vectors.py``。
+"""Edge behaviour of ``model_format``. Real miner repos live in
+``test_model_golden_vectors.py``.
 
-用例分两类：**必须放行的**（放行错了 = 拒了已经烧过 TAO 的矿工）和
-**必须拒绝的**（拒错了 = 白烧一次 GPU 时间）。
+The cases split in two: the ones that **must be accepted** (accepting wrongly =
+rejecting a miner who has already burned TAO) and the ones that **must be
+rejected** (rejecting wrongly = burning a slot of GPU time for nothing).
 """
 
 from __future__ import annotations
@@ -31,11 +33,12 @@ def _warn_codes(paths: list[CheckpointFile]) -> list[FormatIssueCode]:
     return [i.code for i in check_checkpoint_layout(paths).warnings]
 
 
-# ── 布局本身 ──────────────────────────────────────────────────────────────
+# ── The layout itself ─────────────────────────────────────────────────────
 
 
 def test_norm_stats_path_is_derived_from_the_asset_id() -> None:
-    """路径不是另写一个常量，是从 ``asset_id`` 推出来的，两者不可能漂。"""
+    """The path is not a second constant written out by hand, it is derived from
+    ``asset_id``, so the two cannot drift apart."""
     assert LIBERO_LAYOUT.norm_stats_relpath == NORM_STATS
     assert LIBERO_LAYOUT.asset_id in LIBERO_LAYOUT.norm_stats_relpath
 
@@ -55,7 +58,8 @@ def test_jax_orbax_checkpoint_is_accepted() -> None:
 
 
 def test_pytorch_wins_when_both_formats_are_present() -> None:
-    """openpi 加载 ``model.safetensors`` 并忽略 ``params/``，报告跟它走。"""
+    """openpi loads ``model.safetensors`` and ignores ``params/``; the report
+    follows it."""
     report = check_checkpoint_layout(
         _f("model.safetensors", "params/_METADATA", NORM_STATS)
     )
@@ -63,19 +67,22 @@ def test_pytorch_wins_when_both_formats_are_present() -> None:
 
 
 def test_a_file_literally_named_params_is_not_a_jax_checkpoint() -> None:
-    """``params`` 得是路径中间的一层目录，不能是最后那个文件名。"""
+    """``params`` has to be a directory level in the middle of the path, it
+    cannot be the final file name."""
     assert _codes(_f("params", NORM_STATS)) == [FormatIssueCode.MISSING_WEIGHTS]
 
 
 def test_nested_layout_is_accepted_at_any_depth() -> None:
-    """uid 130 把整棵 checkpoint 放在 ``merged/`` 下，是合法提交。"""
+    """uid 130 put the whole checkpoint under ``merged/``; that is a legal
+    submission."""
     assert check_checkpoint_layout(
         _f("merged/model.safetensors", f"merged/{NORM_STATS}")
     ).ok
 
 
 def test_deeper_nesting_than_the_evaluator_searches_warns_but_passes() -> None:
-    """准入放行（生产就是这么判的），但评测器只往下找两层 —— 提前告诉矿工。"""
+    """Admission accepts it (that is how production judges it), but the evaluator
+    only searches two levels down — tell the miner up front."""
     files = _f(f"a/b/c/{LIBERO_LAYOUT.pytorch_weights_file}", f"a/b/c/{NORM_STATS}")
     report = check_checkpoint_layout(files)
     assert report.ok
@@ -83,12 +90,13 @@ def test_deeper_nesting_than_the_evaluator_searches_warns_but_passes() -> None:
 
 
 def test_a_shallow_copy_silences_the_nesting_warning() -> None:
-    """评测器取最浅的那份，所以只要有一份够浅就没问题。"""
+    """The evaluator takes the shallowest copy, so as long as one copy is shallow
+    enough there is no problem."""
     files = _f("a/b/c/model.safetensors", "model.safetensors", NORM_STATS)
     assert check_checkpoint_layout(files).warnings == ()
 
 
-# ── 必须拒绝 ──────────────────────────────────────────────────────────────
+# ── Must be rejected ──────────────────────────────────────────────────────
 
 
 def test_no_weights_is_rejected() -> None:
@@ -96,7 +104,8 @@ def test_no_weights_is_rejected() -> None:
 
 
 def test_bare_lora_adapter_is_rejected_with_its_own_reason() -> None:
-    """判定和「缺权重」一样是拒，但理由要说得清 —— 矿工得知道去合并。"""
+    """The verdict is rejection just like "missing weights", but the reason has to
+    be spelled out — the miner needs to know to go and merge."""
     files = _f("adapter_config.json", "adapter_model.safetensors", NORM_STATS)
     report = check_checkpoint_layout(files)
     assert [i.code for i in report.errors] == [FormatIssueCode.BARE_LORA_ADAPTER]
@@ -105,7 +114,8 @@ def test_bare_lora_adapter_is_rejected_with_its_own_reason() -> None:
 
 
 def test_merged_checkpoint_shipped_next_to_the_adapter_is_fine() -> None:
-    """合并后的完整权重在，顺手把 adapter 也传上来不算裸 adapter。"""
+    """The merged full weights are there; also uploading the adapter alongside
+    them does not make it a bare adapter."""
     files = _f("adapter_model.safetensors", "model.safetensors", NORM_STATS)
     assert check_checkpoint_layout(files).ok
 
@@ -115,19 +125,22 @@ def test_missing_norm_stats_is_rejected() -> None:
 
 
 def test_leftover_upload_state_is_rejected() -> None:
-    """``.cache/models/x.bin`` 的 basename 不是 dotfile，必须逐段查路径。"""
+    """The basename of ``.cache/models/x.bin`` is not a dotfile, so the path has
+    to be checked segment by segment."""
     files = _f("model.safetensors", NORM_STATS, ".cache/huggingface/x.bin")
     assert _codes(files) == [FormatIssueCode.LEFTOVER_UPLOAD_STATE]
 
 
 def test_incomplete_file_is_rejected_even_with_a_multi_dot_name() -> None:
-    """取第一个点时 ``checkpoint.001.tmp`` 的后缀会算成 ``.001.tmp``，漏判。"""
+    """Taking the first dot makes the suffix of ``checkpoint.001.tmp`` come out as
+    ``.001.tmp``, which misses the verdict."""
     files = _f("model.safetensors", NORM_STATS, "checkpoint.001.tmp")
     assert _codes(files) == [FormatIssueCode.INCOMPLETE_FILE]
 
 
 def test_too_small_repo_is_rejected() -> None:
-    """十几 KB 的"权重"基本只是 LFS 指针，没传真文件。"""
+    """A dozen-odd KB of "weights" is basically just an LFS pointer, the real
+    files were never uploaded."""
     files = _f("model.safetensors", NORM_STATS, size=1024)
     report = check_checkpoint_layout(files)
     assert [i.code for i in report.errors] == [FormatIssueCode.TOTAL_SIZE_TOO_SMALL]
@@ -135,7 +148,8 @@ def test_too_small_repo_is_rejected() -> None:
 
 
 def test_size_is_not_reported_on_top_of_a_real_problem() -> None:
-    """缺文件的仓库本来就小，两条一起报是噪音。生产就是这么判的。"""
+    """A repo with missing files is small to begin with; reporting both is noise.
+    That is how production judges it."""
     assert _codes(_f("README.md", size=10)) == [
         FormatIssueCode.MISSING_WEIGHTS,
         FormatIssueCode.MISSING_NORM_STATS,
@@ -147,11 +161,12 @@ def test_size_threshold_is_ten_megabytes() -> None:
     assert check_checkpoint_layout(files).ok
 
 
-# ── dotfile：2026-08-14 误拒事故 ──────────────────────────────────────────
+# ── dotfiles: the 2026-08-14 false-rejection incident ─────────────────────
 
 
 def test_gitattributes_is_not_a_problem() -> None:
-    """HF 建仓库时自动生成它。按前缀拒等于拒绝所有矿工（8/8 的仓库都有）。"""
+    """HF generates it automatically when a repo is created. Rejecting on the
+    prefix means rejecting every miner (8 out of 8 repos have it)."""
     files = _f("model.safetensors", NORM_STATS, ".gitattributes")
     report = check_checkpoint_layout(files)
     assert report.ok
@@ -159,23 +174,27 @@ def test_gitattributes_is_not_a_problem() -> None:
 
 
 def test_dotfiles_do_not_count_towards_the_size() -> None:
-    """它们不是模型内容，算进体积会让「太小」这条判定失真。"""
+    """They are not model content; counting them towards the size would distort
+    the "too small" verdict."""
     files = _f("model.safetensors", NORM_STATS, ".gitignore", size=1024)
     assert check_checkpoint_layout(files).counted_size_bytes == 2048
 
 
 def test_rejected_segments_can_be_whitelisted() -> None:
-    """误拒真实矿工时的现场逃生口（生产配置 ``scanner.hf_allow_dotfiles``）。"""
+    """The on-the-spot escape hatch for when a real miner is falsely rejected
+    (production config ``scanner.hf_allow_dotfiles``)."""
     files = _f("model.safetensors", NORM_STATS, ".cache/x.bin")
     allowed = frozenset({".cache"})
     assert check_checkpoint_layout(files, allowed_path_segments=allowed).ok
 
 
-# ── 准入放行、但评测器加载不了的历史分歧 ──────────────────────────────────
+# ── Historical divergences that admission lets through but the evaluator
+#    cannot load ───────────────────────────────────────────────────────────
 
 
 def test_legacy_pytorch_bin_passes_admission_with_a_warning() -> None:
-    """生产准入认 ``pytorch_model.bin``，评测器不认 —— 判定不动，先把话说清。"""
+    """Production admission accepts ``pytorch_model.bin``, the evaluator does not
+    — leave the verdict alone, but say it out loud first."""
     report = check_checkpoint_layout(_f("pytorch_model.bin", NORM_STATS))
     assert report.ok
     assert report.kind is None
@@ -190,7 +209,8 @@ def test_legacy_bin_next_to_real_weights_does_not_warn() -> None:
 
 
 def test_legacy_norm_stats_location_passes_admission_with_a_warning() -> None:
-    """生产准入还认 ``assets/libero/`` 和裸 ``norm_stats.json`` 两个位置。"""
+    """Production admission also accepts two other locations: ``assets/libero/``
+    and a bare ``norm_stats.json``."""
     files = _f("model.safetensors", "assets/libero/norm_stats.json")
     report = check_checkpoint_layout(files)
     assert report.ok

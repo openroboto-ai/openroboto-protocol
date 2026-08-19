@@ -1,30 +1,43 @@
-"""可提交的 checkpoint 必须长什么样 —— 布局层的准入契约。
+"""What a submittable checkpoint has to look like — the admission contract at
+the layout level.
 
-契约含义
---------
-矿工照它导出，后端照它准入，评测器照它拒绝。三方看同一份规则，矿工才能在
-**烧 TAO 之前**知道自己会不会被拒。现在这条规则有两份实现（后端
-``hf_validate.py`` 判 HF 仓库树，评测器 ``libero_eval/check_model.py`` 判本地目录），
-矿工要 clone 第二个仓才能自查 —— 烧完才发现格式错，TAO 白扔。
+Contract meaning
+----------------
+Miners export according to it, the backend admits according to it, the
+evaluator rejects according to it. Only when all three look at the same set of
+rules can a miner know **before burning TAO** whether they will be rejected.
+Right now this rule has two implementations (the backend's ``hf_validate.py``
+judges the HF repo tree, the evaluator's ``libero_eval/check_model.py`` judges a
+local directory), and a miner has to clone a second repo to self-check — find
+out the format is wrong only after burning, and the TAO is thrown away.
 
-输入是一份**文件清单**（路径 + 字节数），清单从哪来这里不管：后端从 HF tree API
-拿，矿工从本地目录 ``os.walk`` 拿，评测器从下载完的目录拿。同一份清单，三方得到
-同一个结论。
+The input is a **file list** (path + byte size); where the list comes from is
+not this module's business: the backend gets it from the HF tree API, a miner
+gets it from ``os.walk`` over a local directory, the evaluator gets it from the
+directory it finished downloading. Same list, and all three arrive at the same
+conclusion.
 
-不负责（这些都要读文件内容，留在评测器里）
-------------------------------------------
-- safetensors 头、orbax ``params/_METADATA``、参数量区间、norm_stats 里的数值；
-- 架构是不是 π0.5（``time_mlp_*`` vs ``state_proj``）；
-- 下载、解析 HF API 响应、判断 revision 存不存在。
+Not responsible for (all of these need to read file contents, they stay in the
+evaluator)
+------------------------------------------------------------------------------
+- The safetensors header, orbax ``params/_METADATA``, the parameter-count
+  range, the numbers inside norm_stats;
+- Whether the architecture is π0.5 (``time_mlp_*`` vs ``state_proj``);
+- Downloading, parsing HF API responses, deciding whether a revision exists.
 
-**布局过了不等于评测一定能加载。** 这里过了只说明「值得花 GPU 时间试一试」。
+**Passing the layout check does not mean evaluation will actually load it.**
+Passing here only says "this is worth spending GPU time trying".
 
-errors 与 warnings 的分工
--------------------------
-``errors`` 复刻**生产准入**的判定（``hf_validate.validate_file_list``），
-一条不多一条不少 —— 它决定一笔已经烧掉的 TAO 算不算数，不是能顺手收紧的地方。
-``warnings`` 是已知的「准入放行、但评测器加载不了」的分歧，不改变判定，
-只是把矿工会踩的坑提前说出来。分歧本身待裁决（见包内 openQuestions）。
+The division of labour between errors and warnings
+--------------------------------------------------
+``errors`` reproduces the judgement of **production admission**
+(``hf_validate.validate_file_list``), not one condition more and not one fewer
+— it decides whether a burn of TAO that has already happened counts, which is
+not the place to tighten things up in passing.
+``warnings`` are the known divergences where "admission lets it through but the
+evaluator cannot load it"; they do not change the judgement, they only tell the
+miner in advance about the pit they are going to fall into. The divergence
+itself is still to be adjudicated (see openQuestions inside the package).
 """
 
 from __future__ import annotations
@@ -36,10 +49,12 @@ from typing import Final
 
 
 class CheckpointKind(StrEnum):
-    """checkpoint 的两种权重形态。字面量和评测器的 ``checkpoint_type`` 一致。
+    """The two weight forms a checkpoint can take. The literals match the
+    evaluator's ``checkpoint_type``.
 
-    两种同时存在时 openpi 加载 PyTorch 权重、忽略 ``params/``，
-    所以 :func:`check_checkpoint_layout` 也按这个优先级报。
+    When both are present openpi loads the PyTorch weights and ignores
+    ``params/``, so :func:`check_checkpoint_layout` reports them in the same
+    order of precedence.
     """
 
     PYTORCH = "pytorch"
@@ -47,60 +62,74 @@ class CheckpointKind(StrEnum):
 
 
 class FormatIssueCode(StrEnum):
-    """拒绝 / 提醒的稳定机器码。
+    """Stable machine codes for a rejection / a heads-up.
 
-    ``message`` 面向人（原样回传矿工，会变），``code`` 面向程序（矿工侧脚本、
-    前端文案、告警规则都可以匹配它，**不许改**）。加新码是 minor，改旧码是 major。
+    ``message`` is for humans (it is passed back to the miner verbatim, and it
+    will change), ``code`` is for programs (miner-side scripts, frontend copy,
+    and alerting rules may all match on it, so it **must not** be changed).
+    Adding a new code is minor, changing an old one is major.
     """
 
     MISSING_WEIGHTS = "missing_weights"
-    """既没有 ``model.safetensors`` 也没有 ``params/`` —— 不是一个 checkpoint。"""
+    """Neither ``model.safetensors`` nor ``params/`` — this is not a
+    checkpoint."""
 
     BARE_LORA_ADAPTER = "bare_lora_adapter"
-    """只有 LoRA adapter，没有合并后的完整权重。评测器不做合并。"""
+    """Only a LoRA adapter, without the merged full weights. The evaluator does
+    no merging."""
 
     MISSING_NORM_STATS = "missing_norm_stats"
-    """缺归一化统计量，推理时无法归一化输入 / 反归一化动作。"""
+    """Normalization stats are missing, so inference cannot normalize the input
+    or unnormalize the actions."""
 
     LEFTOVER_UPLOAD_STATE = "leftover_upload_state"
-    """``.git`` / ``.cache`` 这类误传上来的仓库内部状态。"""
+    """Repository-internal state such as ``.git`` / ``.cache`` uploaded by
+    mistake."""
 
     INCOMPLETE_FILE = "incomplete_file"
-    """``.tmp`` / ``.partial`` 之类没传完的文件。"""
+    """Files that did not finish uploading, such as ``.tmp`` / ``.partial``."""
 
     TOTAL_SIZE_TOO_SMALL = "total_size_too_small"
-    """整个仓库小于 10 MB —— 多半只传了 LFS 指针，没传权重。"""
+    """The whole repo is under 10 MB — most likely only the LFS pointers were
+    uploaded, not the weights."""
 
     UNLOADABLE_WEIGHTS_FORMAT = "unloadable_weights_format"
-    """（warning）准入认的权重文件名，评测器加载不了。"""
+    """(warning) A weights filename that admission accepts but the evaluator
+    cannot load."""
 
     NON_CANONICAL_NORM_STATS = "non_canonical_norm_stats"
-    """（warning）norm_stats 在准入认的备用位置，评测器只读规范位置。"""
+    """(warning) norm_stats sits at one of the alternative locations that
+    admission accepts, but the evaluator reads only the canonical one."""
 
     NESTED_TOO_DEEP = "nested_too_deep"
-    """（warning）checkpoint 嵌得比评测器搜索的层数还深。"""
+    """(warning) The checkpoint is nested deeper than the number of levels the
+    evaluator searches."""
 
 
 @dataclass(frozen=True)
 class OpenpiLayout:
-    """openpi checkpoint 的布局。这几个字段必须同源，所以绑在一起。
+    """The layout of an openpi checkpoint. These fields must come from the same
+    source, so they are bound together.
 
-    ``norm_stats_relpath`` 是**推导出来的**而不是另写一个常量 —— 评测器就是
-    ``assets / asset_id / "norm_stats.json"`` 这么拼的，写成两个独立常量迟早会漂。
+    ``norm_stats_relpath`` is **derived** rather than written as yet another
+    constant — the evaluator assembles it exactly as
+    ``assets / asset_id / "norm_stats.json"``, and writing it as two independent
+    constants would drift sooner or later.
     """
 
     asset_id: str
-    """norm stats 挂在 ``assets/<asset_id>/`` 下。LIBERO 是上游 openpi 的资产 id。"""
+    """Norm stats hang under ``assets/<asset_id>/``. For LIBERO this is the
+    asset id from upstream openpi."""
 
     pytorch_weights_file: str
-    """openpi PyTorch checkpoint 的权重文件名。"""
+    """Filename of the weights in an openpi PyTorch checkpoint."""
 
     jax_params_dir: str
-    """openpi JAX checkpoint 的 orbax OCDBT 目录名。"""
+    """Directory name of the orbax OCDBT store in an openpi JAX checkpoint."""
 
     @property
     def norm_stats_relpath(self) -> str:
-        """归一化统计量相对 checkpoint 根的路径。"""
+        """Path of the normalization stats relative to the checkpoint root."""
         return f"assets/{self.asset_id}/norm_stats.json"
 
 
@@ -109,18 +138,22 @@ LIBERO_LAYOUT: Final = OpenpiLayout(
     pytorch_weights_file="model.safetensors",
     jax_params_dir="params",
 )
-"""子网当前唯一接受的布局：openpi + LIBERO 资产。"""
+"""The only layout the subnet currently accepts: openpi + the LIBERO asset."""
 
 LEGACY_PYTORCH_WEIGHTS_FILE: Final = "pytorch_model.bin"
-"""生产准入历史上认这个名字。评测器**加载不了**它 —— 放行但出 warning。"""
+"""Production admission has historically accepted this name. The evaluator
+**cannot load** it — let it through, but emit a warning."""
 
 LEGACY_NORM_STATS_RELPATHS: Final = ("assets/libero/norm_stats.json", "norm_stats.json")
-"""生产准入历史上认的备用 norm_stats 位置。评测器只读规范位置 —— 放行但出 warning。"""
+"""The alternative norm_stats locations production admission has historically
+accepted. The evaluator reads only the canonical path — let it through, but
+emit a warning."""
 
 LORA_ADAPTER_MARKERS: Final = frozenset(
     {"adapter_config.json", "adapter_model.safetensors", "adapter_model.bin"}
 )
-"""裸 LoRA adapter 的特征文件名。识别它只为了给一条**说得清**的拒绝理由。"""
+"""Characteristic filenames of a bare LoRA adapter. They are recognized only so
+that the rejection can come with a reason that **makes sense**."""
 
 REJECTED_PATH_SEGMENTS: Final = frozenset(
     {
@@ -133,32 +166,40 @@ REJECTED_PATH_SEGMENTS: Final = frozenset(
         ".Trash",
     }
 )
-"""误传上来的仓库内部状态，明确列举。
+"""Repository-internal state uploaded by mistake, listed explicitly.
 
-⚠️ **不能改成「以 . 开头就拒」。** HF 建仓库时自动生成 ``.gitattributes``，
-2026-08-14 按前缀拒的规则接上生产，误拒了 uid 221 / 231 两个**已经烧过 TAO**
-的提交；当时抽查榜上 8 个已通过评测的仓库，8/8 都有这个文件 —— 规则一旦生效
-等于拒绝所有人。加名字要有具体理由。
+⚠️ **This must not be turned into "reject anything starting with a dot".** HF
+generates ``.gitattributes`` automatically when a repo is created; on
+2026-08-14 a prefix-based rejection rule was wired up to production and falsely
+rejected uid 221 / 231, two submissions that **had already burned TAO**; a spot
+check of 8 repos on the board that had already passed evaluation found the file
+in 8 out of 8 — the rule taking effect is equivalent to rejecting everyone.
+Adding a name requires a specific reason.
 """
 
 INCOMPLETE_FILE_SUFFIXES: Final = frozenset(
     {".tmp", ".temp", ".partial", ".crdownload", ".download", ".lock", ".swp", ".swo"}
 )
-"""没传完 / 临时文件的后缀。"""
+"""Suffixes of unfinished / temporary files."""
 
 MIN_TOTAL_SIZE_BYTES: Final = 10 * 1024 * 1024
-"""整仓最小体积。低于这个数基本只有 LFS 指针，没有真权重。"""
+"""Minimum size of the whole repo. Below this number there are basically only
+LFS pointers and no real weights."""
 
 MAX_CHECKPOINT_NESTING_DEPTH: Final = 2
-"""评测器只在根、``*/``、``*/*/`` 三层里找 checkpoint。埋得更深它找不到。"""
+"""The evaluator looks for the checkpoint only at three levels: the root,
+``*/``, and ``*/*/``. Buried deeper than that, it will not find it."""
 
 
 @dataclass(frozen=True)
 class CheckpointFile:
-    """清单里的一个文件。路径和体积必须同源 —— 判定同时用到这两个。
+    """One file in the list. Path and size must come from the same source — the
+    judgement uses both at once.
 
-    ``path`` 是相对 checkpoint 根（或仓库根）的 POSIX 路径，不以 ``/`` 开头。
-    只传文件；目录条目传进来无害（体积 0、匹配不上任何规则），但不要指望它被判定。
+    ``path`` is a POSIX path relative to the checkpoint root (or the repo root),
+    and does not start with ``/``.
+    Only pass files; directory entries do no harm if passed in (size 0, they
+    match no rule), but do not expect them to be judged.
     """
 
     path: str
@@ -167,7 +208,8 @@ class CheckpointFile:
 
 @dataclass(frozen=True)
 class FormatIssue:
-    """一条判定结果。``message`` 是原样回传矿工的英文原因。"""
+    """One judgement result. ``message`` is the English reason passed back to
+    the miner verbatim."""
 
     code: FormatIssueCode
     message: str
@@ -175,45 +217,55 @@ class FormatIssue:
 
 @dataclass(frozen=True)
 class FormatReport:
-    """一次布局判定的完整结论。"""
+    """The complete conclusion of one layout judgement."""
 
     kind: CheckpointKind | None
-    """识别出的权重形态；``None`` = 没识别出可加载的 checkpoint。"""
+    """The weight form that was recognized; ``None`` = no loadable checkpoint
+    was recognized."""
 
     errors: tuple[FormatIssue, ...]
-    """非空 = 拒绝提交。顺序：逐文件问题 → 缺权重 → 缺 norm_stats → 体积过小。"""
+    """Non-empty = the submission is rejected. Order: per-file problems →
+    missing weights → missing norm_stats → size too small."""
 
     warnings: tuple[FormatIssue, ...]
-    """不影响判定，但矿工大概率会在评测阶段踩到。"""
+    """They do not affect the judgement, but the miner will very likely hit
+    them during the evaluation stage."""
 
     counted_size_bytes: int
-    """参与体积判定的字节数。dotfile 与被拒文件不计入。
+    """The number of bytes that took part in the size judgement. Dotfiles and
+    rejected files are not counted.
 
-    别在调用方重新求和 —— 求和口径不一样，「体积过小」这条判定就会对不上。
+    Do not re-sum this in the caller — a different way of summing makes the
+    "size too small" judgement disagree.
     """
 
     @property
     def ok(self) -> bool:
-        """能不能提交。"""
+        """Whether it can be submitted."""
         return not self.errors
 
 
 def _suffix(basename: str) -> str:
-    """取**最后**一个点之后的后缀（含点）；没有则空串。
+    """Take the suffix after the **last** dot (dot included); empty string if
+    there is none.
 
-    取第一个点时 ``checkpoint.001.tmp`` 的后缀会算成 ``.001.tmp``，匹配不上
-    :data:`INCOMPLETE_FILE_SUFFIXES` —— 任何多点文件名都能绕过临时文件检查，
-    而拦残留上传正是这条检查的全部目的。
+    Taking the first dot would make the suffix of ``checkpoint.001.tmp`` come
+    out as ``.001.tmp``, which matches nothing in
+    :data:`INCOMPLETE_FILE_SUFFIXES` — any filename with several dots could then
+    get past the temporary-file check, and catching leftover uploads is the
+    entire purpose of that check.
     """
     idx = basename.rfind(".")
     return basename[idx:] if idx > 0 else ""
 
 
 def _matches(path: str, relpath: str) -> bool:
-    """路径是不是 ``relpath`` 本身，或嵌在任意层子目录下的 ``relpath``。
+    """Whether the path is ``relpath`` itself, or ``relpath`` nested under any
+    number of subdirectories.
 
-    嵌套必须认：uid 130 把整个 openpi checkpoint 放在 ``merged/`` 下面
-    （10.8 GB，norm_stats 齐全，合法提交），只认仓库根会把它判成「缺模型文件」。
+    Nesting must be accepted: uid 130 put the whole openpi checkpoint under
+    ``merged/`` (10.8 GB, norm_stats complete, a legitimate submission), and
+    accepting only the repo root would have judged it as "model file missing".
     """
     return path == relpath or path.endswith("/" + relpath)
 
@@ -223,11 +275,13 @@ def check_checkpoint_layout(
     *,
     allowed_path_segments: frozenset[str] = frozenset(),
 ) -> FormatReport:
-    """判定一份文件清单能不能作为 checkpoint 提交。
+    """Judge whether a file list can be submitted as a checkpoint.
 
-    ``allowed_path_segments`` 覆盖 :data:`REJECTED_PATH_SEGMENTS`
-    （对应生产配置 ``scanner.hf_allow_dotfiles``）。正常不需要设 ——
-    默认规则已经只拒明确有问题的名字；它是误拒真实矿工时的现场逃生口。
+    ``allowed_path_segments`` overrides :data:`REJECTED_PATH_SEGMENTS`
+    (it corresponds to the production setting ``scanner.hf_allow_dotfiles``).
+    Normally there is no need to set it — the default rules already reject only
+    names that are clearly wrong; it is the on-the-spot escape hatch for when a
+    real miner is falsely rejected.
     """
     errors: list[FormatIssue] = []
     warnings: list[FormatIssue] = []
@@ -235,7 +289,8 @@ def check_checkpoint_layout(
 
     has_pytorch = has_jax = has_legacy_weights = False
     has_canonical_stats = has_legacy_stats = has_adapter = False
-    # 权重可能在多个层级各有一份，评测器取最浅的那份，所以只有最浅的深度算数。
+    # There may be one copy of the weights at each of several levels; the
+    # evaluator takes the shallowest one, so only the shallowest depth counts.
     weights_depths: list[int] = []
 
     for file in files:
@@ -254,8 +309,9 @@ def check_checkpoint_layout(
             )
             continue
 
-        # 其余 dotfile（.gitattributes / .gitignore …）放行，且不计入体积：
-        # 它们不是模型内容，HF 自己会生成。
+        # Other dotfiles (.gitattributes / .gitignore …) are let through, and
+        # are not counted towards the size: they are not model content, and HF
+        # generates them itself.
         if any(p.startswith(".") for p in parts):
             continue
 
@@ -272,7 +328,8 @@ def check_checkpoint_layout(
             )
             continue
 
-        # 目录型标记看路径中间那几段，文件型标记看整条路径。
+        # Directory-shaped markers are looked for in the middle segments of the
+        # path, file-shaped markers in the whole path.
         if LIBERO_LAYOUT.jax_params_dir in parts[:-1]:
             has_jax = True
             weights_depths.append(parts.index(LIBERO_LAYOUT.jax_params_dir))
@@ -350,7 +407,8 @@ def check_checkpoint_layout(
             )
         )
 
-    # 只在没有别的问题时才报体积。缺文件的仓库本来就小，两条一起报是噪音。
+    # Only report the size when there is no other problem. A repo with files
+    # missing is small anyway, and reporting both at once is noise.
     if counted_size < MIN_TOTAL_SIZE_BYTES and not errors:
         errors.append(
             FormatIssue(

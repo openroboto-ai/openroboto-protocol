@@ -1,38 +1,49 @@
-"""任务状态与阶段词表 —— 子网里唯一的一份。
+"""Task status and stage vocabularies — the only copy in the subnet.
 
-**为什么它必须只有一份**：2026-08-14 事故里同一件事有四套写法 —— worker 内部叫
-`evaluating`、公开文档叫 `running`、后端只认 `status` 字段、前端类型叫 `stage`。
-结果是按文档写 worker 的人收到 `400 Unknown status`，队列页的进度条整个消失。
-当时的"修复"不是统一词表，而是在 worker 里加了一张手写翻译表
-（`benchmark_worker/backend_client.py` 的 `_PROGRESS_STAGE_MAP`）。这个模块是那张
-翻译表的正解：词表只有一份，装同一个版本号的包就不可能对不上。
+**Why there must be only one**: in the 2026-08-14 incident the same thing had four
+spellings — the worker internally called it `evaluating`, the public docs called it
+`running`, the backend only recognized the `status` field, and the frontend types called
+it `stage`. The result was that whoever wrote a worker against the docs got
+`400 Unknown status`, and the queue page's progress bar disappeared entirely.
+The "fix" back then was not to unify the vocabulary but to add a hand-written
+translation table inside the worker (`_PROGRESS_STAGE_MAP` in
+`benchmark_worker/backend_client.py`). This module is the real answer to that
+translation table: there is only one vocabulary, and packages installing the same
+version number cannot disagree.
 
-**两套词表不是一回事，混用是事故本身**：
+**The two vocabularies are not the same thing, and mixing them is the incident itself**:
 
-- **status**：提交走到哪一步。生命周期状态，取值见 `ALL_STATUSES`。
-- **stage**：worker 认领任务后在干什么。进度明细，取值见 `ALL_STAGES`，
-  只在 status 为 `evaluating` 期间有意义。
+- **status**: which step the submission has reached. The lifecycle status; for the
+  values see `ALL_STATUSES`.
+- **stage**: what the worker is doing after claiming the task. The progress detail; for
+  the values see `ALL_STAGES`, meaningful only while status is `evaluating`.
 
-`evaluating` 是 **status**；`running` 是 **stage**。它们描述的是同一段时间，
-但不是同一套词表，任何一边写成另一边的词都会被对方判为非法。
+`evaluating` is a **status**; `running` is a **stage**. They describe the same span of
+time, but they are not the same vocabulary, and either side written with the other
+side's word is judged illegal by that other side.
 
-⚠️ 这里说的是**词表**，不是承载它的字段名，更不是数据库列名。
-携带生命周期状态的响应字段**逐端点不同** —— `SubmissionRecord` 叫 `status`，
-其余四个模型叫 `eval_status`。哪个端点是哪个，以 `schemas.py` 的
-`STATUS_VALUED_FIELDS` 为准（那张表由 `tests/test_schemas.py` 逐条核对，
-不会和代码漂开）。**不要在这里记第二份。**
+⚠️ What is discussed here is the **vocabulary**, not the field name carrying it, and
+certainly not the database column name. The response field carrying the lifecycle status
+**differs per endpoint** — `SubmissionRecord` calls it `status`, the other four models
+call it `eval_status`. Which endpoint is which is decided by `STATUS_VALUED_FIELDS` in
+`schemas.py` (that table is checked entry by entry by `tests/test_schemas.py`, so it
+cannot drift away from the code). **Do not keep a second copy here.**
 
-**线上事实**（2026-08-17 curl `GET /api/v1/submissions/history?limit=500`，117 条）：
+**Live facts** (2026-08-17, curl `GET /api/v1/submissions/history?limit=500`, 117 rows):
 
-- `eval_status` 出现过：`evaluated` 65 / `superseded` 32 / `eval_failed` 13 /
-  `rejected` 7；`GET /api/v1/queue/status` 的 summary 另有 `pending` / `evaluating`。
-- `stage` 出现过：`running` 61 / `""` 47 / `downloading` 8 / `prechecking` 1。
-  **没有出现过 `evaluating`** —— 对外的规范阶段词是 `running`，这条是裁决依据。
+- `eval_status` has appeared as: `evaluated` 65 / `superseded` 32 / `eval_failed` 13 /
+  `rejected` 7; the summary of `GET /api/v1/queue/status` additionally has `pending` /
+  `evaluating`.
+- `stage` has appeared as: `running` 61 / `""` 47 / `downloading` 8 / `prechecking` 1.
+  **`evaluating` has never appeared** — the canonical public stage word is `running`,
+  and this is the basis of that ruling.
 
-**这个模块不负责**：状态怎么持久化（存哪张表哪一列、哪一列是权威）、谁有权改状态、
-超时怎么判。那些是后端的事 —— 而且权威列在数据迁移前后是**相反**的
-（迁移前 `eval_status`，迁移后 `status`），写进这个包等于让一个不可回收的版本号
-去承诺一件别的仓库随时会改的事。
+**What this module is not responsible for**: how the status is persisted (which table,
+which column, which column is authoritative), who is allowed to change the status, how
+timeouts are judged. Those are the backend's business — and moreover the authoritative
+column is **the opposite** before and after the data migration (`eval_status` before,
+`status` after), so writing it into this package would make an unrecoverable version
+number promise something another repository can change at any time.
 """
 
 from __future__ import annotations
@@ -43,83 +54,102 @@ from types import MappingProxyType
 from typing import Final
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 提交状态（生命周期）
+# Submission status (lifecycle)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# 扫链刚看到这条 commitment，还没做任何校验。建行时的默认值（schema.py 的 DEFAULT）。
+# The chain scanner has just seen this commitment and has not validated anything yet.
+# The default value at row creation (the DEFAULT in schema.py).
 STATUS_RECEIVED: Final[str] = "received"
 
-# 正在核对链上 burn 交易。⚠️ 瞬时值：一个扫链周期内就会离开，不该有行长期停在这里。
+# Verifying the on-chain burn transaction. ⚠️ A transient value: it is left within one
+# scanning cycle, and no row should sit here for long.
 STATUS_BURN_CHECKING: Final[str] = "burn_checking"
 
-# burn 校验通过，等待派种子。同样是瞬时值。
+# The burn check passed, waiting for a seed to be dispatched. Also a transient value.
 STATUS_BURN_PASSED: Final[str] = "burn_passed"
 
-# 已入评测队列，等 worker 来领。
+# Queued for evaluation, waiting for a worker to claim it.
 STATUS_PENDING: Final[str] = "pending"
 
-# 派种子失败（drand 拿不到）。**可重试**，不是终态 —— 扫链每轮结束会重试一次，
-# 成功则回到 pending。drand 不可用时宁可卡住也不能退化成只用 block_hash 派种子，
-# 否则历史评测不可复现（spec §5）。
+# Seed dispatch failed (drand could not be reached). **Retryable**, not terminal — the
+# chain scanner retries once at the end of every round, and on success it goes back to
+# pending. While drand is unavailable it is better to be stuck than to degrade into
+# deriving the seed from block_hash alone, otherwise historical evaluations are not
+# reproducible (spec §5).
 STATUS_SEED_FAILED: Final[str] = "seed_failed"
 
-# worker 已认领并在跑。此期间 stage 字段才有意义。
+# A worker has claimed it and is running. Only during this time is the stage field
+# meaningful.
 STATUS_EVALUATING: Final[str] = "evaluating"
 
-# 出分成功，分数进 eval_scores，参与排名。
+# Scored successfully; the scores go into eval_scores and take part in ranking.
 STATUS_EVALUATED: Final[str] = "evaluated"
 
-# 评测失败（worker 报错 / 模型跑不起来）。终态，不重试。
+# Evaluation failed (the worker errored / the model would not run). Terminal, no retry.
 STATUS_EVAL_FAILED: Final[str] = "eval_failed"
 
-# 被拒（burn 不合格 / HF 仓结构不合格 / 重复提交 / 轮次不匹配）。
+# Rejected (bad burn / bad HF repo structure / duplicate submission / round mismatch).
 STATUS_REJECTED: Final[str] = "rejected"
 
-# 同一 (hotkey, round) 有了新版本，这条被顶掉。
-# ⚠️ 老 `protocol/status.py` 的 ALL_STATUSES **漏了它**，`is_terminal()` 对它返回
-# False —— 当时零消费方所以没出事，这里补上（incident-20260814-context.md 收尾项 7）。
+# A new version exists for the same (hotkey, round), so this one was pushed out.
+# ⚠️ The old `protocol/status.py`'s ALL_STATUSES **missed it**, and `is_terminal()`
+# returned False for it — there were zero consumers at the time so nothing broke; it is
+# added here (wrap-up item 7 of incident-20260814-context.md).
 STATUS_SUPERSEDED: Final[str] = "superseded"
 
 
-# 终态：不再往前走。
-# 注意与 FROZEN_STATUSES 的区别 —— 终态说的是"流程结束"，冻结说的是"DB 拒绝任何写入"。
+# Terminal states: they do not move forward any more.
+# Note the difference from FROZEN_STATUSES — terminal says "the process has ended",
+# frozen says "the DB rejects any write".
 TERMINAL_STATUSES: Final[frozenset[str]] = frozenset(
     {STATUS_EVALUATED, STATUS_EVAL_FAILED, STATUS_REJECTED, STATUS_SUPERSEDED}
 )
 
-# 冻结态：**任何**迟到的写入都必须被拒绝，连同值重写也不行。
+# Frozen states: **any** late write must be rejected, rewriting the same value included.
 #
-# 这是 2026-08-14 事故 ⑤ 的守卫，代价用 GPU 小时计：worker 本地队列里压着一条已被
-# superseded 的旧任务，跑完出分把该行复活成 evaluated → 它重新落入
-# `idx_sub_hotkey_round_commit` 的谓词（该索引排除 rejected/superseded）→ 撞唯一约束
-# → 出分接口 500，worker 几小时 GPU 白跑；就算不撞，一个被顶掉的版本也重新参与了排名。
+# This is the guard for incident ⑤ of 2026-08-14, and the cost is counted in GPU hours:
+# a worker had an already-superseded old task sitting in its local queue, finished it
+# and posted the score, which resurrected that row into evaluated → the row falls back
+# inside the predicate of `idx_sub_hotkey_round_commit` (that index excludes
+# rejected/superseded) → it hits the unique constraint → the scoring endpoint returns
+# 500 and hours of the worker's GPU time are wasted; and even without the collision, a
+# version that had been pushed out took part in the ranking again.
 #
-# 生产落地形态是两处 SQL 谓词 `eval_status NOT IN ('superseded', 'rejected')`
-# （prototype/backend/database.py:898 与 :1099）以及出分接口的整条丢弃
-# （api/handlers/benchmark.py:182，返回 200 而非错误码，避免 worker 无限重试）。
+# In production this landed as two SQL predicates
+# `eval_status NOT IN ('superseded', 'rejected')` (prototype/backend/database.py:898 and
+# :1099) plus the scoring endpoint discarding the whole thing
+# (api/handlers/benchmark.py:182, returning 200 rather than an error code so the worker
+# does not retry forever).
 FROZEN_STATUSES: Final[frozenset[str]] = frozenset({STATUS_REJECTED, STATUS_SUPERSEDED})
 
 
-# 合法状态转移。**写成数据，不是散在各处的 if** —— 状态机本身要能被测。
+# Legal status transitions. **Written as data, not as ifs scattered around** — the state
+# machine itself has to be testable.
 #
-# 每条边都有生产代码出处；没有出处的边不写进来（宁可少，别猜）：
+# Every edge has a source in production code; edges without a source are not written in
+# (better too few than guessed):
 #   received      → burn_checking            verify_submission.py:560
 #   burn_checking → burn_passed              verify_submission.py:569
 #   burn_passed   → pending                  database.py enqueue_eval
-#   burn_passed   → seed_failed              verify_submission.py:627（drand 不可用）
+#   burn_passed   → seed_failed              verify_submission.py:627 (no drand)
 #   seed_failed   → pending                  scanner_loop.py:_retry_seed_failed
 #   pending       → evaluating               database.py:update_task_progress
-#                                            （CASE WHEN eval_status='pending'，单向）
-#   pending       → evaluated / eval_failed  历史真实路径：修复前 update_task_progress
-#                                            只写 stage 不推状态，全库 0 条 evaluating，
-#                                            几十条 evaluated 全部是从 pending 直接落的
-#                                            （2026-08-19 副本：evaluated 66 条）。
-#                                            **删掉这条边等于宣布线上历史非法。**
-#   pending       → superseded               submission_db.py:supersede_pending —— 它的
-#                                            WHERE 只有一条 eval_status='pending'
+#                                            (CASE WHEN eval_status='pending', one-way)
+#   pending       → evaluated / eval_failed  A real historical path: before the
+#                                            fix, update_task_progress wrote only
+#                                            the stage and did not advance the
+#                                            status, so the whole DB had 0 rows of
+#                                            evaluating while dozens of evaluated
+#                                            rows landed straight from pending
+#                                            (2026-08-19 copy: 66 evaluated).
+#                                            **Deleting this edge declares live
+#                                            history illegal.**
+#   pending       → superseded               submission_db.py:supersede_pending —
+#                                            its WHERE has only one clause,
+#                                            eval_status='pending'
 #   evaluating    → evaluated / eval_failed  database.py:update_submission_status
-#   * → rejected                             扫链侧任何一步都可能判拒
-#                                            （verify_submission.py 有 8 处）
+#   * → rejected                             the scanner side may reject at any
+#                                            step (verify_submission.py has 8)
 _TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     STATUS_RECEIVED: frozenset({STATUS_BURN_CHECKING, STATUS_REJECTED}),
     STATUS_BURN_CHECKING: frozenset({STATUS_BURN_PASSED, STATUS_REJECTED}),
@@ -139,36 +169,43 @@ _TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     STATUS_EVALUATING: frozenset(
         {STATUS_EVALUATED, STATUS_EVAL_FAILED, STATUS_REJECTED}
     ),
-    # 终态没有出边。spec 不变量 7：单向，不许回退。
+    # Terminal states have no outgoing edges. Spec invariant 7: one-way, no going back.
     STATUS_EVALUATED: frozenset(),
     STATUS_EVAL_FAILED: frozenset(),
     STATUS_REJECTED: frozenset(),
     STATUS_SUPERSEDED: frozenset(),
 }
 
-#: 状态机本体：`{当前状态: 允许迁往的状态集合}`。只读，消费方不可改。
+#: The state machine itself: `{current status: set of statuses it may move to}`.
+#: Read-only; consumers must not modify it.
 STATUS_TRANSITIONS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(_TRANSITIONS)
 
-#: 全部合法状态。**与转移表同源**（就是它的键集），不可能出现"表里有、词表没有"。
+#: Every legal status. **Same source as the transition table** (it is exactly its key
+#: set), so "in the table but not in the vocabulary" cannot happen.
 ALL_STATUSES: Final[frozenset[str]] = frozenset(STATUS_TRANSITIONS)
 
 
 def is_terminal(status: str) -> bool:
-    """这个状态是不是终态（流程结束，不会再往前走）。
+    """Whether this status is terminal (the process has ended, it goes no further).
 
-    ⚠️ 与老 `backend/protocol/status.py` 的同名函数有一处差异：那里 `superseded`
-    返回 False（词表本身就漏了它）。老函数当时零消费方，这里按事实修正。
+    ⚠️ One difference from the function of the same name in the old
+    `backend/protocol/status.py`: there `superseded` returned False (the vocabulary
+    itself missed it). That old function had zero consumers at the time, so here it is
+    corrected against the facts.
     """
     return status in TERMINAL_STATUSES
 
 
 def can_transition(current: str, new: str) -> bool:
-    """`current → new` 这次状态变更合不合法。未知状态一律 False（fail-closed）。
+    """Whether the status change `current → new` is legal. An unknown status is always
+    False (fail-closed).
 
-    `current == new` 的同值重写按合法处理 —— worker 的出分 POST 超时后会重投同一份
-    分数（`backend_client.py` 先 `fetch_submission` 核对再决定是否重试），
-    落库就是一次 `evaluated → evaluated`。但冻结态除外：对 rejected / superseded
-    连同值重写都必须挡住，生产的 SQL 谓词就是这么写的。
+    Rewriting the same value, `current == new`, is treated as legal — after the scoring
+    POST times out the worker re-posts the same scores (`backend_client.py` first calls
+    `fetch_submission` to check and then decides whether to retry), and storing that is
+    one `evaluated → evaluated`. Frozen states are the exception: for rejected /
+    superseded even rewriting the same value must be blocked, which is exactly how
+    production's SQL predicates are written.
     """
     if current not in STATUS_TRANSITIONS or new not in STATUS_TRANSITIONS:
         return False
@@ -178,33 +215,39 @@ def can_transition(current: str, new: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 评测阶段（进度明细）
+# Evaluation stage (progress detail)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
 class Stage:
-    """一个评测阶段在三处的写法，绑成一条记录。
+    """The three spellings of one evaluation stage, bound into a single record.
 
-    分开写就是 ZCY-158：三个名字散在三个仓库里，改一处漏两处，错配不报错、数据悄悄错。
-    绑在一起之后，"对外说 running、库里存 benchmark_running、worker 叫 evaluating"
-    这三件事要么一起对要么一起错，不可能只错一半。
+    Writing them apart is ZCY-158: three names scattered across three repositories,
+    change one and miss two, and the mismatch does not raise — the data just goes
+    quietly wrong. Bound together, "say running to the outside, store benchmark_running
+    in the DB, the worker calls it evaluating" are either all three right or all three
+    wrong; being only half wrong is impossible.
     """
 
-    #: 对外的规范词。worker 该发这个，API 该返回这个，前端该按这个渲染。
-    #: 生产 `GET /api/v1/submissions/history` 的 `stage` 字段返回的就是这个词
-    #: （2026-08-17 实测）。
+    #: The canonical public word. This is what the worker should send, what the API
+    #: should return, and what the frontend should render against.
+    #: It is exactly the word production's `GET /api/v1/submissions/history` returns in
+    #: the `stage` field (measured 2026-08-17).
     wire: str
-    #: 历史存储值（带 `benchmark_` 前缀）。出口翻译前的样子，读老数据时会遇到。
-    #: ⚠️ **两种写法是并存的**，不是「老数据全带前缀」：2026-08-19 的生产副本里
-    #: `running` 38 行、`benchmark_running` 24 行、`downloading` 8 行（裸）、
-    #: `benchmark_prechecking` 2 行（带前缀）。所以入口必须两种都收 —— 这正是
-    #: `_STAGE_LOOKUP` 把 wire / stored / aliases 三者并列的理由。
-    #: **不要**把带前缀的吐给前端 —— 前端的 ACTIVE_STAGES 里没有带前缀的写法，
-    #: 认不出就不渲染。
+    #: The historical stored value (with the `benchmark_` prefix). What it looks like
+    #: before the exit translation; you meet it when reading old data.
+    #: ⚠️ **The two spellings coexist**, it is not "all old data has the prefix": in the
+    #: 2026-08-19 production copy there are 38 rows of `running`, 24 rows of
+    #: `benchmark_running`, 8 rows of `downloading` (bare) and 2 rows of
+    #: `benchmark_prechecking` (prefixed). So the entry point must accept both — that is
+    #: exactly why `_STAGE_LOOKUP` puts wire / stored / aliases side by side.
+    #: **Do not** emit the prefixed form to the frontend — the frontend's ACTIVE_STAGES
+    #: has no prefixed spelling, and what it does not recognize it does not render.
     stored: str
-    #: 输入侧还接受的同义词。收下它们纯粹是加法：按公开文档或前端类型写的调用方
-    #: 曾经因此收到 400（2026-08-14 实际发生）。
+    #: The synonyms also accepted on the input side. Taking them is purely additive:
+    #: callers written against the public docs or the frontend types used to get a 400
+    #: because of this (actually happened on 2026-08-14).
     aliases: tuple[str, ...] = ()
 
 
@@ -213,37 +256,44 @@ STAGE_PRECHECKING: Final[str] = "prechecking"
 STAGE_RUNNING: Final[str] = "running"
 STAGE_CLAIMED: Final[str] = "claimed"
 
-#: 阶段词表。顺序即 worker 的实际执行顺序。
+#: The stage vocabulary. The order is the worker's actual execution order.
 STAGES: Final[tuple[Stage, ...]] = (
-    # `claimed` = worker 领了任务但还没开始下载，所以排在最前。
+    # `claimed` = the worker took the task but has not started downloading, so it comes
+    # first.
     #
-    # 2026-08-19 补进来。此前这个包只有三个阶段，而**生产接受第四个**：
-    # `prototype-prod/backend/api/handlers/benchmark.py::handle_status_update`
-    # 的白名单是 `{benchmark_downloading, benchmark_prechecking,
-    # benchmark_running, benchmark_claimed}`，不在里面的一律 `INVALID_STATUS`。
+    # Added on 2026-08-19. Before that this package had only three stages, while
+    # **production accepts a fourth**: the whitelist of
+    # `prototype-prod/backend/api/handlers/benchmark.py::handle_status_update` is
+    # `{benchmark_downloading, benchmark_prechecking, benchmark_running,
+    # benchmark_claimed}`, and anything not in it gets `INVALID_STATUS`.
     #
-    # ⚠️ 证据有两份且方向相反，最后按「代码接受什么」定：
-    # 08-18 的生产副本里 `claimed` 在 `stage` / `status` / `eval_status` /
-    # `submission_history.eval_status` **四个列里都是 0 次** —— 它从没被存过。
-    # 但少这一条的后果不是「多一个没用的词」，是 worker 上报 `claimed` 时
-    # 我们判非法、生产收下 —— 两边对同一个输入给出不同答案，
-    # 正是这个包存在要消灭的东西。
+    # ⚠️ There are two pieces of evidence and they point in opposite directions; the
+    # decision follows "what the code accepts": in the 08-18 production copy `claimed`
+    # appears **0 times in all four columns** `stage` / `status` / `eval_status` /
+    # `submission_history.eval_status` — it has never been stored. But the consequence
+    # of missing this entry is not "one useless extra word"; it is that when a worker
+    # reports `claimed` we judge it illegal while production accepts it — two sides
+    # different answers for the same input, which is exactly what this package exists to
+    # eliminate.
     Stage(wire=STAGE_CLAIMED, stored="benchmark_claimed"),
     Stage(wire=STAGE_DOWNLOADING, stored="benchmark_downloading"),
-    # `precheck` 是前端类型里的写法（web/src/api/types.ts 的 QueueProgressStage）。
+    # `precheck` is the spelling in the frontend types (QueueProgressStage in
+    # web/src/api/types.ts).
     Stage(
         wire=STAGE_PRECHECKING,
         stored="benchmark_prechecking",
         aliases=("precheck",),
     ),
-    # `evaluating` 是 worker 内部的写法（run_eval.py 往进度文件里写的就是它），
-    # 也是老后端唯一认的输入词。**对外规范词是 running**：线上 117 条记录里
-    # stage 出现过 running / downloading / prechecking，从没出现过 evaluating。
-    # worker 侧的 `_PROGRESS_STAGE_MAP` 就是在做这一步翻译，接了这个包之后可以删掉。
+    # `evaluating` is the worker's internal spelling (it is what run_eval.py writes into
+    # the progress file), and also the only input word the old backend recognized.
+    # **The canonical public word is running**: across the 117 live records, stage has
+    # appeared as running / downloading / prechecking and never as evaluating.
+    # The worker-side `_PROGRESS_STAGE_MAP` is doing exactly this translation and can be
+    # deleted once it depends on this package.
     Stage(wire=STAGE_RUNNING, stored="benchmark_running", aliases=("evaluating",)),
 )
 
-#: 全部合法阶段词（对外规范形态）。与 STAGES 同源。
+#: Every legal stage word (in canonical public form). Same source as STAGES.
 ALL_STAGES: Final[frozenset[str]] = frozenset(s.wire for s in STAGES)
 
 _STAGE_LOOKUP: Final[dict[str, str]] = {
@@ -254,28 +304,35 @@ _STAGE_LOOKUP: Final[dict[str, str]] = {
 
 
 def normalize_stage(word: str) -> str | None:
-    """任何一方的阶段写法 → 对外规范词。不认识返回 None，由调用方决定怎么拒。
+    """Any side's stage spelling → the canonical public word. Returns None when it is
+    not recognized, and the caller decides how to reject it.
 
-    大小写与首尾空白按生产入口的做法先归一（`.strip().lower()`）。
+    Case and leading/trailing whitespace are normalized first the way the production
+    entry point does it (`.strip().lower()`).
     """
     return _STAGE_LOOKUP.get(word.strip().lower())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 历史遗留状态词
+# Legacy status words
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: 老状态词 → 现行状态词。
+#: Old status word → current status word.
 #:
-#: 这些词今天还活在生产数据里（2026-08-19 副本实测：`done` 37 / `failed` 4 /
-#: `confirmed` 1 / `enqueued` 17），它们是同一件事在词表统一之前的四套写法。
+#: These words are still alive in production data today (measured on the 2026-08-19
+#: copy: `done` 37 / `failed` 4 / `confirmed` 1 / `enqueued` 17); they are the four
+#: spellings of the same thing from before the vocabulary was unified.
 #:
-#: 出事的形状不是「有老词」，而是**两套词混进同一个响应**：前端按
-#: `submission.status || submission.eval_status` 读，先读到的恰好是没归一的那个 ——
-#: 2026-08-14 队列页 95 条里 33 条状态显示错误。所以归一必须发生在**一个**地方。
+#: The shape that goes wrong is not "there are old words", it is **two vocabularies
+#: mixed into the same response**: the frontend reads
+#: `submission.status || submission.eval_status`, and the one it reads first happens to
+#: be the un-normalized one — on 2026-08-14, 33 of the 95 rows on the queue page showed
+#: wrong status. So normalization must happen in **one** place.
 #:
-#: **`ALL_STATUSES` 是唯一真源。** 这张表只用于读老数据，不要用它生成新值。
-#: 老词今天具体存在哪个存储位置、归一到哪一步为止，是后端的事，不在本模块的承诺范围内。
+#: **`ALL_STATUSES` is the single source of truth.** This table is only for reading old
+#: data; do not use it to produce new values.
+#: Which storage location the old words live in today, and up to which step they are
+#: normalized, is the backend's business and not within this module's promises.
 LEGACY_STATUS_ALIASES: Final[Mapping[str, str]] = MappingProxyType(
     {
         "enqueued": STATUS_PENDING,
@@ -292,9 +349,11 @@ LEGACY_STATUS_ALIASES: Final[Mapping[str, str]] = MappingProxyType(
 
 
 def normalize_status(status: str) -> str:
-    """老状态词 → 现行状态词。不在表里的原样返回（与老实现行为一致）。
+    """Old status word → current status word. Words not in the table are returned
+    verbatim (the same behaviour as the old implementation).
 
-    原样返回是故意的：调用方拿到的可能是一个未知的新词，这里不该替它判非法 ——
-    合法性由 `ALL_STATUSES` 判。
+    Returning them verbatim is deliberate: what the caller has may be an unknown new
+    word, and this function should not judge it illegal on their behalf — legality is
+    judged by `ALL_STATUSES`.
     """
     return LEGACY_STATUS_ALIASES.get(status, status)

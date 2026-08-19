@@ -1,15 +1,19 @@
-"""链上事实：这里的每一行都是已经发生过的评测，改一行就是改历史。
+"""On-chain facts: every row here is an evaluation that already happened, and
+changing one row means rewriting history.
 
-数据来源：生产 PostgreSQL 的导出
-``openroboto-backend/tests/fixtures/prod-data.sql``（round 1，netuid 80），
-取自 ``submissions`` 与 ``submissions_master`` 两表中 seed / block_hash /
-drand_random 三列齐全的记录，按 (block_hash, round_num, drand_random) 去重。
+Data source: the production PostgreSQL dump
+``openroboto-backend/tests/fixtures/prod-data.sql`` (round 1, netuid 80),
+taken from the records in the ``submissions`` and ``submissions_master`` tables
+that have all three of seed / block_hash / drand_random, deduplicated by
+(block_hash, round_num, drand_random).
 
-其中的 drand randomness 已对公开信标做过抽样复核（round 6347967 / 6370589
-与 https://api.drand.sh 返回的 randomness 逐字一致），确认它们确实是公开信标值、
-不是后端自己编的数。
+The drand randomness values were spot-checked against the public beacon
+(rounds 6347967 / 6370589 match the randomness returned by
+https://api.drand.sh verbatim), confirming that they really are public beacon
+values and not numbers the backend made up itself.
 
-这个文件只有一个用途：只要有人动了 ``derive_seed`` 的行为，它立刻变红。
+This file has exactly one purpose: the moment anyone changes the behaviour of
+``derive_seed``, it goes red.
 """
 
 from __future__ import annotations
@@ -18,8 +22,9 @@ import pytest
 
 from openroboto_protocol.seed import SEED_MAX, SeedInputs, derive_seed, verify_seed
 
-#: 可复现的历史向量：(block_hash, round_num, drand_random, seed)
-#: 42 条，覆盖 round 1 全部能从存储输入复算出来的提交。
+#: Reproducible historical vectors: (block_hash, round_num, drand_random, seed)
+#: 42 of them, covering every round 1 submission that can be recomputed from the
+#: stored inputs.
 GOLDEN_SEEDS: tuple[tuple[str, int, str, int], ...] = (
     (  # uid 109 · drand round 6347967
         "0x56036890baf63e76acbc2cc7b33a4d660167e2727ceb9e3b5519c9bb2be33603",
@@ -275,17 +280,22 @@ GOLDEN_SEEDS: tuple[tuple[str, int, str, int], ...] = (
     ),
 )
 
-#: ⚠️ 不可复现清单
-#: (block_hash, round_num, drand_random, 库里存的 seed, 用存储输入复算出的 seed)
+#: ⚠️ The unreproducible list
+#: (block_hash, round_num, drand_random, seed stored in the DB, seed recomputed
+#: from the stored inputs)
 #:
-#: 这 3 条（uid 60 / 194 / 192）**不是**黄金向量，它们进不了 GOLDEN_SEEDS。
-#: 已核实的事实只有一条：库里存的 seed 与**库里存的那份输入**算不出来。
-#: 也就是说，当初参与派生的输入和最终落库的那份不是同一份，真实输入已经没了。
-#: 具体是哪一步覆盖了输入，本次没有查到证据，不在这里写猜测。
-#: 已获认可：不追认、不改数据、不塞进黄金向量 —— 否则测试永远红。
+#: These 3 (uid 60 / 194 / 192) are **not** golden vectors; they must not go into
+#: GOLDEN_SEEDS. Only one fact has been verified: the seed stored in the DB
+#: cannot be derived from **the inputs stored in the DB**. In other words, the
+#: inputs that actually took part in the derivation are not the ones that ended
+#: up persisted, and the real inputs are gone. Which step overwrote the inputs
+#: was not established this time round, and guesses are not written down here.
+#: Acknowledged: do not retroactively bless them, do not edit the data, do not
+#: stuff them into the golden vectors — otherwise the test stays red forever.
 #:
-#: 它们留在这里当**回归哨兵**：复算结果被钉死，任何人动了 derive_seed，
-#: 这三条和上面 42 条会同时响。
+#: They stay here as **regression sentinels**: the recomputed results are pinned
+#: down, so if anyone touches derive_seed these three and the 42 above go off at
+#: the same time.
 UNREPRODUCIBLE_SEEDS: tuple[tuple[str, int, str, int, int], ...] = (
     (  # uid 194 · drand round 6351121
         "0xab4d6be1f17d75ff33671881b3281f14fac725f3d3a73bff5cd5b3401b3bdb6c",
@@ -317,7 +327,8 @@ UNREPRODUCIBLE_SEEDS: tuple[tuple[str, int, str, int, int], ...] = (
 def test_golden_seed_is_reproducible(
     block_hash: str, round_num: int, drand_random: str, seed: int
 ) -> None:
-    """链上发生过的每一条评测，今天必须还能算出同一个 seed。"""
+    """Every evaluation that happened on chain must still derive the same seed
+    today."""
     assert derive_seed(block_hash, round_num, drand_random) == seed
     assert verify_seed(seed, block_hash, round_num, drand_random)
     assert SeedInputs(block_hash, round_num, drand_random).verify(seed)
@@ -329,12 +340,14 @@ def test_golden_seed_is_reproducible(
 def test_golden_seed_is_uint32(
     block_hash: str, round_num: int, drand_random: str, seed: int
 ) -> None:
-    """历史 seed 全部落在 uint32 值域内 —— 存 seed 的列必须是 BIGINT 才装得下。"""
+    """Every historical seed falls inside the uint32 range — the column storing
+    the seed must be BIGINT to hold it."""
     assert 0 <= seed <= SEED_MAX
 
 
 def test_golden_vector_set_is_intact() -> None:
-    """向量条数与去重性本身也是契约：少一条就是有人删了一段历史。"""
+    """The number of vectors and their uniqueness are part of the contract too:
+    one missing row means someone deleted a piece of history."""
     assert len(GOLDEN_SEEDS) == 42
     keys = {(bh, rn, dr) for bh, rn, dr, _ in GOLDEN_SEEDS}
     assert len(keys) == len(GOLDEN_SEEDS)
@@ -351,14 +364,16 @@ def test_unreproducible_seed_stays_unreproducible(
     stored_seed: int,
     derived_seed: int,
 ) -> None:
-    """这 3 条已知对不上。复算结果被钉死 —— 变了说明公式被动过。"""
+    """These 3 are known not to match. The recomputed results are pinned down —
+    if they change, the formula has been touched."""
     assert derive_seed(block_hash, round_num, drand_random) == derived_seed
     assert derived_seed != stored_seed
     assert not verify_seed(stored_seed, block_hash, round_num, drand_random)
 
 
 def test_unreproducible_list_is_exactly_three() -> None:
-    """已获认可的例外就这 3 条。多一条就是又出了一次同样的事故，必须有人看见。"""
+    """The acknowledged exceptions are exactly these 3. One more means the same
+    incident happened again, and someone has to see it."""
     assert len(UNREPRODUCIBLE_SEEDS) == 3
     assert not {(bh, rn, dr) for bh, rn, dr, _, _ in UNREPRODUCIBLE_SEEDS} & {
         (bh, rn, dr) for bh, rn, dr, _ in GOLDEN_SEEDS

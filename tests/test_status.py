@@ -1,7 +1,8 @@
-"""status.py 的契约测试。
+"""Contract tests for status.py.
 
-每一条断言要么来自线上实测，要么来自生产代码里一条有出处的路径。
-带 `线上` 字样的注释是 2026-08-17 对 https://api.openroboto.ai 的只读实测结果。
+Every assertion here comes either from a live measurement or from a path in
+production code with a traceable source. Comments that say "live" are read-only
+measurements taken against https://api.openroboto.ai on 2026-08-17.
 """
 
 from __future__ import annotations
@@ -12,25 +13,29 @@ import pytest
 
 from openroboto_protocol import status as S
 
-# ── 词表本身 ──────────────────────────────────────────────────────────────
+# ── The vocabulary itself ─────────────────────────────────────────────────
 
 
 def test_all_statuses_is_the_transition_table_keys() -> None:
-    """状态全集与转移表同源 —— 不可能出现"表里有、词表没有"。"""
+    """The full status set and the transition table share one source — it is
+    impossible to have "in the table but not in the vocabulary"."""
     assert S.ALL_STATUSES == set(S.STATUS_TRANSITIONS)
 
 
 def test_transition_targets_are_all_known_statuses() -> None:
-    """转移表不能指向词表外的状态（写错一个字母就会在这里露出来）。"""
+    """The transition table must not point at a status outside the vocabulary (a
+    single mistyped letter shows up right here)."""
     for src, targets in S.STATUS_TRANSITIONS.items():
-        assert targets <= S.ALL_STATUSES, f"{src} 指向了未知状态"
+        assert targets <= S.ALL_STATUSES, f"{src} points at an unknown status"
 
 
 def test_production_observed_statuses_are_all_legal() -> None:
-    """线上 `GET /api/v1/submissions/history?limit=500` 出现过的 eval_status
-    共 4 种（evaluated 65 / superseded 32 / eval_failed 13 / rejected 7），
-    `GET /api/v1/queue/status` 的 summary 另有 pending / evaluating。
-    词表漏掉任何一个都会让线上真实数据变成"非法状态"。
+    """The eval_status values that have appeared in live
+    `GET /api/v1/submissions/history?limit=500` are 4 in total
+    (evaluated 65 / superseded 32 / eval_failed 13 / rejected 7), and the summary
+    of `GET /api/v1/queue/status` additionally has pending / evaluating.
+    Missing any one of them from the vocabulary would turn real live data into an
+    "illegal status".
     """
     observed = {
         "evaluated",
@@ -44,23 +49,24 @@ def test_production_observed_statuses_are_all_legal() -> None:
 
 
 def test_superseded_is_in_the_vocabulary() -> None:
-    """老 `backend/protocol/status.py` 的 ALL_STATUSES 漏了它，线上却有 32 条。"""
+    """The ALL_STATUSES of the old `backend/protocol/status.py` was missing it,
+    while there are 32 rows of it in production."""
     assert S.STATUS_SUPERSEDED in S.ALL_STATUSES
     assert S.is_terminal(S.STATUS_SUPERSEDED)
 
 
 def test_transition_table_is_read_only() -> None:
-    """共享契约不能被消费方就地改掉。"""
+    """A shared contract must not be patched in place by a consumer."""
     with pytest.raises(TypeError):
         S.STATUS_TRANSITIONS["pending"] = frozenset()  # type: ignore[index]
 
 
-# ── 终态 / 冻结态 ─────────────────────────────────────────────────────────
+# ── Terminal / frozen states ──────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("st", ["evaluated", "eval_failed", "rejected", "superseded"])
 def test_terminal_states_have_no_outgoing_edges(st: str) -> None:
-    """spec 不变量 7：单向，不许回退。"""
+    """spec invariant 7: one-way, no going back."""
     assert S.is_terminal(st)
     assert S.STATUS_TRANSITIONS[st] == frozenset()
 
@@ -81,38 +87,44 @@ def test_non_terminal_states(st: str) -> None:
 
 
 def test_seed_failed_is_retryable_not_terminal() -> None:
-    """drand 拿不到时的 seed_failed 会被扫链下一轮重试回 pending。"""
+    """The seed_failed produced when drand cannot be fetched is retried back to
+    pending by the next chain-scanning round."""
     assert not S.is_terminal(S.STATUS_SEED_FAILED)
     assert S.can_transition(S.STATUS_SEED_FAILED, S.STATUS_PENDING)
 
 
 def test_frozen_is_a_strict_subset_of_terminal() -> None:
-    """冻结态（DB 拒绝任何写入）是终态的子集，不是同一件事。"""
+    """The frozen states (the DB refuses any write) are a subset of the terminal
+    states, not the same thing."""
     assert S.FROZEN_STATUSES < S.TERMINAL_STATUSES
     assert S.FROZEN_STATUSES == {"rejected", "superseded"}
 
 
-# ── 状态机 ────────────────────────────────────────────────────────────────
+# ── The state machine ─────────────────────────────────────────────────────
 
 
 def test_spec_invariant_7_happy_path() -> None:
-    """pending → evaluating → evaluated / eval_failed / rejected。"""
+    """pending → evaluating → evaluated / eval_failed / rejected."""
     assert S.can_transition(S.STATUS_PENDING, S.STATUS_EVALUATING)
     for terminal in (S.STATUS_EVALUATED, S.STATUS_EVAL_FAILED, S.STATUS_REJECTED):
         assert S.can_transition(S.STATUS_EVALUATING, terminal)
 
 
 def test_state_machine_never_goes_backwards() -> None:
-    """回退一律非法 —— 这是 2026-08-14 事故 ⑤ 的核心。"""
+    """Going backwards is illegal without exception — this is the core of
+    incident ⑤ on 2026-08-14."""
     assert not S.can_transition(S.STATUS_EVALUATING, S.STATUS_PENDING)
     assert not S.can_transition(S.STATUS_EVALUATED, S.STATUS_EVALUATING)
     assert not S.can_transition(S.STATUS_PENDING, S.STATUS_RECEIVED)
 
 
 def test_superseded_cannot_be_revived_by_a_late_score() -> None:
-    """线上实证：uid 175 的 id=79 已被顶掉，worker 仍在跑，跑完出分想把它写成
-    evaluated。复活会撞 idx_sub_hotkey_round_commit 唯一约束 → 出分接口 500，
-    worker 几小时 GPU 白跑；就算不撞，被顶掉的版本也重新参与了排名。
+    """Live evidence: id=79 of uid 175 had already been superseded while the
+    worker was still running, and once it finished scoring it wanted to write it
+    as evaluated. Reviving it would hit the idx_sub_hotkey_round_commit unique
+    constraint → the scoring endpoint 500s and the worker's hours of GPU time are
+    wasted; and even if it did not hit the constraint, a superseded version would
+    have re-entered the ranking.
     """
     for late in (S.STATUS_EVALUATED, S.STATUS_EVAL_FAILED, S.STATUS_EVALUATING):
         assert not S.can_transition(S.STATUS_SUPERSEDED, late)
@@ -120,29 +132,34 @@ def test_superseded_cannot_be_revived_by_a_late_score() -> None:
 
 
 def test_pending_to_terminal_directly_is_legal() -> None:
-    """历史真实路径：修复前 update_task_progress 只写 stage 不推状态，
-    全库 0 条 evaluating，线上 65 条 evaluated 全是从 pending 直接落的。
-    判它非法等于宣布线上历史非法。
+    """A real historical path: before the fix, update_task_progress only wrote the
+    stage and never advanced the status, so there are 0 rows of evaluating in the
+    whole database and all 65 live evaluated rows landed directly from pending.
+    Judging that illegal would be declaring live history illegal.
     """
     assert S.can_transition(S.STATUS_PENDING, S.STATUS_EVALUATED)
     assert S.can_transition(S.STATUS_PENDING, S.STATUS_EVAL_FAILED)
 
 
 def test_supersede_only_from_pending() -> None:
-    """`supersede_pending` 的 WHERE 就一条：eval_status = 'pending'。"""
+    """The WHERE of `supersede_pending` has exactly one clause:
+    eval_status = 'pending'."""
     assert S.can_transition(S.STATUS_PENDING, S.STATUS_SUPERSEDED)
     assert not S.can_transition(S.STATUS_EVALUATING, S.STATUS_SUPERSEDED)
 
 
 def test_reject_is_reachable_from_every_non_terminal_state() -> None:
-    """扫链侧任何一步都可能判拒（burn 不合格 / HF 结构 / 重复 / 轮次不匹配）。"""
+    """Any step on the chain-scanning side may end in rejection (burn not valid /
+    HF structure / duplicate / round mismatch)."""
     for src in S.ALL_STATUSES - S.TERMINAL_STATUSES:
         assert S.can_transition(src, S.STATUS_REJECTED), src
 
 
 def test_idempotent_rewrite_is_allowed_except_when_frozen() -> None:
-    """worker 出分 POST 超时会重投同一份分数，落库就是一次 evaluated → evaluated。
-    但冻结态连同值重写都要挡住（生产 SQL 谓词就是这么写的）。
+    """When the worker's scoring POST times out it resubmits the same score, and
+    persisting it is an evaluated → evaluated transition. But the frozen states
+    must block even a same-value rewrite (that is exactly how the production SQL
+    predicate is written).
     """
     assert S.can_transition(S.STATUS_EVALUATED, S.STATUS_EVALUATED)
     assert S.can_transition(S.STATUS_PENDING, S.STATUS_PENDING)
@@ -151,11 +168,13 @@ def test_idempotent_rewrite_is_allowed_except_when_frozen() -> None:
 
 
 def test_unknown_status_is_rejected_fail_closed() -> None:
-    """未知词一律 False，不做"看起来像什么就当什么"的猜测。"""
+    """An unknown word is always False; no "treat it as whatever it looks like"
+    guessing."""
     assert not S.can_transition("banana", S.STATUS_PENDING)
     assert not S.can_transition(S.STATUS_PENDING, "banana")
     assert not S.can_transition("", "")
-    # 老词表里的写法也不是合法状态 —— 先过 normalize_status 再判。
+    # The spellings from the old vocabulary are not legal statuses either — run
+    # them through normalize_status first, then judge.
     assert not S.can_transition("done", "failed")
 
 
@@ -164,46 +183,55 @@ def test_scan_phase_chain() -> None:
     assert S.can_transition(S.STATUS_BURN_CHECKING, S.STATUS_BURN_PASSED)
     assert S.can_transition(S.STATUS_BURN_PASSED, S.STATUS_PENDING)
     assert S.can_transition(S.STATUS_BURN_PASSED, S.STATUS_SEED_FAILED)
-    # burn 校验没过就不该拿到种子
+    # no seed should be handed out before the burn check has passed
     assert not S.can_transition(S.STATUS_RECEIVED, S.STATUS_PENDING)
 
 
-# ── 阶段词表 ──────────────────────────────────────────────────────────────
+# ── The stage vocabulary ──────────────────────────────────────────────────
 
 
 def test_wire_stage_vocabulary_matches_production() -> None:
-    """词表 = 生产**接受**的四个，不是生产**存过**的三个。
+    """The vocabulary = the four that production **accepts**, not the three that
+    production has **stored**.
 
-    2026-08-19 补了 `claimed`。两份证据方向相反，最后按「代码接受什么」定：
+    `claimed` was added on 2026-08-19. The two pieces of evidence point in
+    opposite directions, and the ruling was made on "what the code accepts":
 
-    - 存过什么：08-18 的生产副本里 `stage` 只有
+    - What has been stored: in the 08-18 production copy `stage` only holds
       running 38 / benchmark_running 24 / "" 47 / downloading 8 /
-      benchmark_prechecking 2，`claimed` 在 `stage`、`status`、`eval_status`、
-      `submission_history.eval_status` **四个列里都是 0 次**。
-    - 接受什么：生产 `backend/api/handlers/benchmark.py::handle_status_update`
-      的白名单是 `{benchmark_downloading, benchmark_prechecking,
-      benchmark_running, benchmark_claimed}`，**不在里面的一律 `INVALID_STATUS`**。
+      benchmark_prechecking 2, and `claimed` occurs **0 times in all four
+      columns** `stage`, `status`, `eval_status` and
+      `submission_history.eval_status`.
+    - What is accepted: the allowlist of production
+      `backend/api/handlers/benchmark.py::handle_status_update` is
+      `{benchmark_downloading, benchmark_prechecking, benchmark_running,
+      benchmark_claimed}`, and **anything not in it is `INVALID_STATUS`**.
 
-    按后者。少这一条的后果不是「多一个没用的词」，是 worker 上报 `claimed` 时
-    被我们判成未知词 —— 而生产会收下它。两边对同一个输入给出不同答案，
-    正是这个包存在要消灭的东西。
+    The latter wins. The consequence of leaving this one out is not "one useless
+    extra word", it is that when a worker reports `claimed` we judge it an
+    unknown word — while production would accept it. Two sides giving different
+    answers for the same input is exactly what this package exists to eliminate.
 
-    **从没出现过 evaluating** —— 对外规范词是 running，这是四方词表之争的裁决依据。
+    **evaluating has never appeared** — the canonical outward word is running,
+    and this is the basis for settling the four-party vocabulary dispute.
     """
     assert S.ALL_STAGES == {"downloading", "prechecking", "running", "claimed"}
     assert "evaluating" not in S.ALL_STAGES
 
 
 def test_worker_internal_word_maps_to_the_wire_word() -> None:
-    """worker 内部叫 evaluating（run_eval.py 写进度文件用的就是它），
-    对外必须是 running。这一行取代 `_PROGRESS_STAGE_MAP`。
+    """Internally the worker calls it evaluating (that is what run_eval.py writes
+    into the progress file), and outwards it must be running. This one line
+    replaces `_PROGRESS_STAGE_MAP`.
     """
     assert S.normalize_stage("evaluating") == S.STAGE_RUNNING
     assert S.normalize_stage("running") == S.STAGE_RUNNING
 
 
 def test_frontend_and_legacy_words_are_accepted() -> None:
-    """按公开文档或前端类型写的调用方曾经因此收到 400（2026-08-14 实际发生）。"""
+    """Callers written against the public documentation or the frontend types
+    have received a 400 because of this (it actually happened on
+    2026-08-14)."""
     assert S.normalize_stage("precheck") == S.STAGE_PRECHECKING
     assert S.normalize_stage("benchmark_running") == S.STAGE_RUNNING
     assert S.normalize_stage("benchmark_downloading") == S.STAGE_DOWNLOADING
@@ -211,17 +239,19 @@ def test_frontend_and_legacy_words_are_accepted() -> None:
 
 
 def test_normalize_stage_strips_and_lowercases() -> None:
-    """生产入口做的就是 `.strip().lower()`。"""
+    """What the production entry point does is exactly `.strip().lower()`."""
     assert S.normalize_stage("  RUNNING \n") == S.STAGE_RUNNING
 
 
 def test_normalize_stage_rejects_unknown() -> None:
-    """`scoring` 只存在于前端词表，没有任何后端路径产出它；空串是"没有阶段"。
+    """`scoring` exists only in the frontend vocabulary, no backend path produces
+    it; the empty string means "no stage".
 
-    ⚠️ `claimed` 曾经在这条里（断言它被拒）。2026-08-19 移出去了：生产的
-    `handle_status_update` 白名单收 `benchmark_claimed`，我们判它非法就等于
-    对同一个输入给出和生产相反的答案。它现在的断言在
-    `test_wire_stage_vocabulary_matches_production`。
+    ⚠️ `claimed` used to be in this test (asserting that it was rejected). It was
+    moved out on 2026-08-19: the production `handle_status_update` allowlist
+    accepts `benchmark_claimed`, so judging it illegal would mean giving the
+    opposite answer to production for the same input. Its assertion now lives in
+    `test_wire_stage_vocabulary_matches_production`.
     """
     assert S.normalize_stage("scoring") is None
     assert S.normalize_stage("") is None
@@ -229,14 +259,17 @@ def test_normalize_stage_rejects_unknown() -> None:
 
 
 def test_stage_records_are_frozen() -> None:
-    """三个名字绑成一条记录，改不动 —— 错配在类型层就不可能发生。"""
+    """The three names are bound into one record and cannot be changed — a
+    mismatch is impossible at the type level."""
     stage = S.STAGES[0]
     with pytest.raises(dataclasses.FrozenInstanceError):
         stage.wire = "nope"  # type: ignore[misc]
 
 
 def test_stage_stored_form_is_the_prefixed_one() -> None:
-    """库里存 benchmark_ 前缀，出口必须翻译；不翻译前端渲染不出进度条。"""
+    """The database stores the benchmark_ prefix and the exit point must
+    translate it; without the translation the frontend renders no progress
+    bar."""
     assert [s.stored for s in S.STAGES] == [
         "benchmark_claimed",
         "benchmark_downloading",
@@ -246,7 +279,8 @@ def test_stage_stored_form_is_the_prefixed_one() -> None:
 
 
 def test_stage_order_is_the_worker_execution_order() -> None:
-    # `claimed`（领了任务、还没开始下载）排在最前 —— 顺序即 worker 的实际执行顺序。
+    # `claimed` (task taken, download not started yet) comes first — the order is
+    # the worker's actual execution order.
     assert [s.wire for s in S.STAGES] == [
         "claimed",
         "downloading",
@@ -255,7 +289,7 @@ def test_stage_order_is_the_worker_execution_order() -> None:
     ]
 
 
-# ── 历史遗留状态词 ────────────────────────────────────────────────────────
+# ── Legacy status words ───────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -273,14 +307,16 @@ def test_stage_order_is_the_worker_execution_order() -> None:
     ],
 )
 def test_legacy_status_aliases(legacy: str, unified: str) -> None:
-    """这些老词今天还活在生产数据里（2026-08-19 副本：done 37 / failed 4 /
-    confirmed 1 / enqueued 17），归一必须只发生在一个地方。"""
+    """These old words are still alive in production data today (2026-08-19 copy:
+    done 37 / failed 4 / confirmed 1 / enqueued 17), and the normalisation must
+    happen in exactly one place."""
     assert S.normalize_status(legacy) == unified
     assert unified in S.ALL_STATUSES
 
 
 def test_normalize_status_passes_unknown_through() -> None:
-    """与老实现一致：不在表里的原样返回，合法性交给 ALL_STATUSES 判。"""
+    """Consistent with the old implementation: anything not in the table is
+    returned unchanged, and legality is left to ALL_STATUSES to judge."""
     assert S.normalize_status("evaluated") == "evaluated"
     assert S.normalize_status("banana") == "banana"
 

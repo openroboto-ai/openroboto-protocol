@@ -1,18 +1,25 @@
-"""`schemas.py` 的契约测试。
+"""Contract tests for `schemas.py`.
 
-**这个文件的定位和普通单测不同**：它锁的不是「函数算得对不对」，而是
-「响应长什么样」。字段少一个、名字改一个、枚举多一个词，都要在这里红 ——
-因为真正的消费方（前端、GPU worker、矿工 CLI、外部验证者）在别人的机器上，
-改坏了不会报错，只会静默拿到 `undefined`。
+**This file plays a different role from an ordinary unit test**: what it pins
+down is not "does the function compute the right thing" but "what does the
+response look like". One field missing, one name changed, one extra word in an
+enum — all of them have to go red here, because the real consumers (the
+frontend, the GPU worker, the miner CLI, external validators) run on other
+people's machines: breaking them raises no error, they just silently get
+`undefined`.
 
-三类断言，对应任务书要求的三件事：
+Three kinds of assertions, matching the three things the task asks for:
 
-1. **字段集不多不少** —— 每个响应模型的键集合逐字写死在这里（`_RESPONSE_KEYS`）。
-   用序列化 schema 而不是 `model_fields`，这样 `computed_field`
-   （`ProgressAccepted.status`）也算在内 —— 消费方看到的是序列化后的 JSON。
-2. **枚举值必须来自 `status.py` 的词表** —— 阶段词与 `ALL_STAGES` 相等；
-   榜位词 / 轮次词与生命周期词零交集（「一个响应一套词」）。
-3. **咬过人的行为** —— 每条测试的 docstring 里写清它守的是哪一次事故。
+1. **The field set is neither more nor less** — the key set of every response
+   model is written out verbatim here (`_RESPONSE_KEYS`). It uses the
+   serialization schema rather than `model_fields`, so that `computed_field`
+   (`ProgressAccepted.status`) is counted too — what the consumer sees is the
+   serialized JSON.
+2. **Enum values must come from the vocabulary in `status.py`** — the stage
+   words equal `ALL_STAGES`; the leaderboard-position words / round words have
+   zero overlap with the lifecycle words ("one response, one vocabulary").
+3. **Behaviour that has bitten someone** — the docstring of each test spells out
+   which incident it guards against.
 """
 
 from __future__ import annotations
@@ -32,16 +39,19 @@ from openroboto_protocol.constants import REQUIRED_ENVS
 from openroboto_protocol.status import ALL_STAGES, ALL_STATUSES, STATUS_PENDING
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. 字段集不多不少
+# 1. The field set is neither more nor less
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: 每个模型序列化后的键集合。**逐字写死**，改这里等于改对外契约。
+#: The key set of every model after serialization. **Written out verbatim**;
+#: changing it here is the same as changing the outward contract.
 #:
-#: 来源：6 份契约卡的「响应字段」行，每一行都标着线上实测或生产代码出处。
-#: 加字段是 minor（消费方缺键有默认值）、删字段和改名是 major —— 两种都必须
-#: 先改这张表，改不动就说明这个改动本来就不该做。
+#: Source: the "response fields" row of the 6 contract cards, each of which cites
+#: a live measurement or a place in production code. Adding a field is minor (a
+#: consumer missing the key has a default), deleting or renaming a field is major
+#: — both of them must change this table first, and if it cannot be changed that
+#: means the change should not have been made in the first place.
 _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
-    # —— 响应信封（ADR 02）——
+    # —— response envelopes (ADR 02) ——
     s.Envelope: {"data", "meta"},
     s.ListEnvelope: {"data", "meta"},
     s.ErrorEnvelope: {"error", "meta"},
@@ -51,12 +61,12 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.Meta: {"request_id", "generated_at"},
     s.ListMeta: {"request_id", "generated_at", "page"},
     s.PageMeta: {"total", "limit", "offset", "has_more"},
-    # —— 共用片段 ——
+    # —— shared fragments ——
     s.MinerRef: {"hotkey", "display_name"},
     s.ModelRef: {"name", "hf_repo", "revision"},
     s.ScoreStat: {"mean", "std", "trials"},
     s.Reason: {"code", "message", "retryable", "source"},
-    # —— worker 契约组 ——
+    # —— the worker contract group ——
     s.QueueTask: {
         "task_id",
         "miner_uid",
@@ -101,7 +111,8 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     },
     s.ScoreAccepted: {"task_id", "ok", "ignored", "message"},
     s.ProgressUpdate: {"task_id", "stage", "detail", "worker_id"},
-    # `status` 是 computed_field —— 旧调用方读它，前端读 `stage`，两个都要给。
+    # `status` is a computed_field — old callers read it, the frontend reads
+    # `stage`, and both have to be given.
     s.ProgressAccepted: {"task_id", "stage", "success", "status"},
     s.SubmissionRecord: {
         "task_id",
@@ -226,7 +237,7 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "reason",
     },
     s.ScanRejectionsResponse: {"rejections", "total", "limit", "offset", "success"},
-    # —— 榜单与轮次 ——
+    # —— leaderboard and rounds ——
     s.TasksPassed: {"passed", "total"},
     s.LeaderboardAudit: {"score_json_url", "logs_url", "env_hash"},
     s.LeaderboardRow: {
@@ -270,7 +281,7 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.CurrentRoundResponse: {"round"},
     s.RoundsSummary: {"rounds_settled", "cumulative_improvement"},
     s.RoundHistoryResponse: {"summary", "rounds", "total"},
-    # —— 运维探针 ——
+    # —— operational probes ——
     s.LivenessResponse: {"round", "netuid", "status"},
     s.ReadinessCheck: {"ok", "detail"},
     s.ReadinessResponse: {"ready", "database", "migration", "alembic_version"},
@@ -278,7 +289,8 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
 
 
 def _serialized_keys(model: type[BaseModel]) -> set[str]:
-    """模型序列化后的 JSON 键集合（含 `computed_field`）。"""
+    """The set of JSON keys a model serializes to (including
+    `computed_field`)."""
     schema = model.model_json_schema(mode="serialization")
     return set(schema["properties"])
 
@@ -289,19 +301,22 @@ def _serialized_keys(model: type[BaseModel]) -> set[str]:
     ids=lambda v: getattr(v, "__name__", ""),
 )
 def test_field_set_is_exact(model: type[BaseModel], expected: set[str]) -> None:
-    """字段集**不多不少**。
+    """The field set is **neither more nor less**.
 
-    少一个 = 消费方拿 `undefined`（前端 `Tolerate rebuilt-backend field renames`
-    那次提交就是在替我们擦屁股）；多一个 = 悄悄扩大了对外承诺，而这个包的版本号
-    就是契约版本，加字段必须是一次显式的 minor bump。
+    One missing = the consumer gets `undefined` (the frontend commit
+    `Tolerate rebuilt-backend field renames` was cleaning up after us); one extra
+    = the outward promise has been quietly widened, and the version number of
+    this package *is* the contract version, so adding a field has to be an
+    explicit minor bump.
     """
     assert _serialized_keys(model) == expected
 
 
 def test_every_exported_model_is_pinned() -> None:
-    """新加的模型必须同时加进 `_RESPONSE_KEYS`。
+    """A newly added model must be added to `_RESPONSE_KEYS` at the same time.
 
-    没有这条，「加一个模型但忘了钉字段集」会完全静默 —— 而那正是这个文件要防的事。
+    Without this test, "adding a model but forgetting to pin its field set" would
+    be completely silent — and that is exactly what this file exists to prevent.
     """
     exported = {
         obj
@@ -314,53 +329,63 @@ def test_every_exported_model_is_pinned() -> None:
 
 
 def test_history_item_never_exposes_legacy_status_column() -> None:
-    """history 行**永不返回 `status`** —— 一个响应只许有一个状态键。
+    """A history row **never returns `status`** — a response is allowed only one
+    status key.
 
-    前端 `normalizeHistoryStatus()` 是 `submission.status || submission.eval_status`，
-    **先读 `status`**，先读到的恰好是没归一的那个 —— 95 条里 33 条状态显示错误就是
-    这么来的（生产两个来源 2026-08-19 副本实测 80 行不一致）。旧实现靠出口
-    `row.pop("status", None)` 才躲过一劫；这里靠模型里根本没有这个字段。
+    The frontend's `normalizeHistoryStatus()` is
+    `submission.status || submission.eval_status`, i.e. it **reads `status`
+    first**, and the one it reads first happens to be the un-normalized one —
+    that is where 33 of the 95 rows showing the wrong status came from (measured
+    on the 2026-08-19 copy of the two production sources: 80 rows disagree). The
+    old implementation only escaped by doing `row.pop("status", None)` at the
+    exit point; here it is because the model simply does not have this field.
     """
     assert "status" not in _serialized_keys(s.SubmissionHistoryItem)
     assert "eval_status" in _serialized_keys(s.SubmissionHistoryItem)
 
 
 def test_history_item_hides_internal_columns() -> None:
-    """4 个内部字段一个都不许出现。
+    """None of the 4 internal fields may appear.
 
-    `repo_hash` 是**抄袭判定的模型指纹**，公开它等于把判定依据交出去；
-    `legacy_task_id` / `hotkey_tag` / `worker_id` 是运维内部字段。
-    线上实测这 33 个键**全量公开**，这条是收窄后的回归护栏。
+    `repo_hash` is **the model fingerprint used for the plagiarism verdict**;
+    publishing it means handing over the basis of the verdict.
+    `legacy_task_id` / `hotkey_tag` / `worker_id` are internal operational
+    fields. Live measurement showed all 33 of these keys **fully exposed**; this
+    test is the regression guard after narrowing that down.
     """
     leaked = {"legacy_task_id", "repo_hash", "hotkey_tag", "worker_id", "eval_detail"}
     assert leaked & _serialized_keys(s.SubmissionHistoryItem) == set()
 
 
 def test_scan_rejection_has_no_surrogate_id() -> None:
-    """线上不返回 `id`（新骨架多加了一个），这里也不加。"""
+    """Production does not return `id` (the new skeleton added one extra), so it
+    is not added here either."""
     assert "id" not in _serialized_keys(s.ScanRejection)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. 枚举值必须来自 status.py 的词表
+# 2. Enum values must come from the vocabulary in status.py
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_stage_vocabulary_is_status_py() -> None:
-    """阶段词表**只有一份**：`EvalStage` 必须逐字等于 `status.ALL_STAGES`。
+    """There is **only one** stage vocabulary: `EvalStage` must equal
+    `status.ALL_STAGES` verbatim.
 
-    ZCY-158 的形状就是同一件事在四个仓库里各有一套写法。这条一红，说明这个模块
-    又长出了第五套。
+    The shape of ZCY-158 was exactly this: the same thing spelled its own way in
+    four repos. Once this goes red, this module has grown a fifth one.
     """
     assert frozenset(get_args(s.EvalStage)) == ALL_STAGES
 
 
 def test_display_vocabularies_never_overlap_lifecycle_words() -> None:
-    """榜位词 / 轮次词与生命周期词**零交集** —— 「一个响应一套词」。
+    """The leaderboard-position words / round words have **zero overlap** with
+    the lifecycle words — "one response, one vocabulary".
 
-    生产 `/api/v1/leaderboard` 在同一个 `status` 字段里同时输出 `champion`（榜位词）
-    和 `scored`（生命周期词），而且因为一句没有 `ORDER BY` 的 `LIMIT 1`，
-    同一份数据两次请求会给出不同的词。
+    Production `/api/v1/leaderboard` emits both `champion` (a
+    leaderboard-position word) and `scored` (a lifecycle word) in the same
+    `status` field, and because of a `LIMIT 1` with no `ORDER BY`, two requests
+    over the same data give different words.
     """
     assert s.LEADERBOARD_STATUSES & ALL_STATUSES == frozenset()
     assert s.ROUND_STATUSES & ALL_STATUSES == frozenset()
@@ -368,27 +393,33 @@ def test_display_vocabularies_never_overlap_lifecycle_words() -> None:
 
 
 def test_leaderboard_status_rejects_lifecycle_words() -> None:
-    """把生命周期词塞进榜单 `status` 必须失败，不能只是「约定不这么干」。"""
+    """Stuffing a lifecycle word into the leaderboard `status` must fail; it must
+    not be merely "a convention not to do that"."""
     with pytest.raises(ValidationError):
         _leaderboard_row(status="evaluating")
     with pytest.raises(ValidationError):
-        # 新骨架 mock 的现值。前端联合类型里没有，CSS 也没有，
-        # 而且 `eliminated` 语义上不成立 —— 挑战失败的矿工根本不在 rows 里。
+        # The current value in the new skeleton's mock. It is not in the
+        # frontend union type, not in the CSS, and `eliminated` does not hold
+        # semantically either — a miner who failed the challenge is not in rows
+        # at all.
         _leaderboard_row(status="eliminated")
 
 
 def test_round_status_rejects_undecided_scoring_word() -> None:
-    """`scoring` 第三态没有站得住的定义（spec 04 §9 Q2），未裁决前不进词表。"""
+    """The third state `scoring` has no defensible definition (spec 04 §9 Q2), so
+    it does not enter the vocabulary until that is settled."""
     with pytest.raises(ValidationError):
         s.RoundSummaryEntry(id=1, label="Round 01", status="scoring")  # type: ignore[arg-type]
 
 
 def test_queue_summary_buckets_are_real_status_words() -> None:
-    """summary 的每个桶都必须是一个真实存在的状态词，`unknown` / `total` 除外。
+    """Every bucket in the summary must be a status word that really exists,
+    except `unknown` / `total`.
 
-    反过来也查一遍：`ALL_STATUSES` 里没有桶的那几个词（`received` /
-    `burn_checking` / `burn_passed` / `seed_failed`）会落进 `unknown` ——
-    **落进去要告警，不许静默丢**，那是 ZCY-130 少算 45 条的教训。
+    Check it the other way round as well: the words in `ALL_STATUSES` that have
+    no bucket (`received` / `burn_checking` / `burn_passed` / `seed_failed`) fall
+    into `unknown` — **falling in there must raise an alert, they must not be
+    dropped silently**; that is the lesson of ZCY-130 undercounting by 45 rows.
     """
     assert set(s.QUEUE_SUMMARY_BUCKETS) <= ALL_STATUSES
     bucket_fields = set(s.QueueSummary.model_fields) - {"unknown", "total"}
@@ -397,21 +428,25 @@ def test_queue_summary_buckets_are_real_status_words() -> None:
 
 
 def test_status_valued_fields_stay_open_typed() -> None:
-    """生命周期状态字段注解成 `str`，**不是 `Literal`**。
+    """Lifecycle status fields are annotated as `str`, **not `Literal`**.
 
-    这是权衡过的：库里冒出一个词表外的状态词时，正确反应是那一行降级 + 告警，
-    而不是整个端点 500 —— 5xx 对 worker 是「重复写库」的按钮（spec 07 §0.3）。
+    This is a considered trade-off: when a status word outside the vocabulary
+    turns up in the database, the correct reaction is to degrade that one row and
+    raise an alert, not to 500 the whole endpoint — a 5xx is the "write to the
+    database again" button for the worker (spec 07 §0.3).
     """
     for model, name in s.STATUS_VALUED_FIELDS:
-        assert name in model.model_fields, f"{model.__name__}.{name} 没了"
+        assert name in model.model_fields, f"{model.__name__}.{name} is gone"
         assert model.model_fields[name].annotation is str
 
 
 def test_reason_code_vocabulary_is_closed() -> None:
-    """`reason.code` 是受控词表，词表外的码在模型层就进不来。
+    """`reason.code` is a controlled vocabulary; a code outside it cannot get in
+    at the model layer.
 
-    ZCY-162：`superseded` 的拒绝原因**无处可读**，前端只能硬编码
-    `unavailable`。`SUPERSEDED` 必须在词表里，这是那句硬编码的解药。
+    ZCY-162: the rejection reason for `superseded` was **nowhere to be read**, so
+    the frontend had to hard-code `unavailable`. `SUPERSEDED` must be in the
+    vocabulary; that is the antidote to that hard-coded line.
     """
     assert "SUPERSEDED" in s.REASON_CODES
     assert "INFRA_ERROR" in s.REASON_CODES
@@ -422,11 +457,13 @@ def test_reason_code_vocabulary_is_closed() -> None:
 
 
 def test_infra_failure_is_retryable_not_a_business_rejection() -> None:
-    """基建故障不是业务拒绝。
+    """An infrastructure failure is not a business rejection.
 
-    `burn_error: failed_to_create_subtensor` 这类必须 `retryable=True`，
-    否则矿工烧掉的 TAO 被一次链 RPC 抖动白扔。模型只保证这个字段存在且是 bool，
-    取值由扫链侧决定 —— 这条测的是「这个开关确实在契约里」。
+    Things like `burn_error: failed_to_create_subtensor` must be
+    `retryable=True`, otherwise the TAO a miner burned is thrown away by one
+    flaky chain RPC call. The model only guarantees that this field exists and is
+    a bool; the value is decided by the chain-scanning side — what this test
+    checks is that "the switch really is in the contract".
     """
     reason = s.Reason(
         code="INFRA_ERROR",
@@ -438,7 +475,7 @@ def test_infra_failure_is_retryable_not_a_business_rejection() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. 咬过人的行为
+# 3. Behaviour that has bitten someone
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -468,26 +505,31 @@ def _leaderboard_row(**overrides: Any) -> s.LeaderboardRow:
     return s.LeaderboardRow.model_validate(payload)
 
 
-# --- 空 env_list（事故 ⑦：worker 空转） ---
+# --- empty env_list (incident ⑦: the worker spinning idle) ---
 
 
 def test_empty_env_list_is_unrepresentable() -> None:
-    """派发任务的 `env_list` **不可能**是空数组。
+    """The `env_list` of a dispatched task **cannot** be an empty array.
 
-    2026-08-14 uid 221/231 的提交进了队列、worker 一直空转，卡的就是这里：
-    库里存的是字符串 `'[]'`，非空字符串是 truthy，`or` 兜底和 `.get(k, default)`
-    都兜不住。必须先 `json.loads` 再判空、空则回填 6 个 suite ——
-    模型这一层是最后一道，让「空」在类型上就不合法。
+    On 2026-08-14 the submissions of uid 221/231 entered the queue and the worker
+    kept spinning idle; this is exactly where they got stuck: what the database
+    stored was the string `'[]'`, a non-empty string is truthy, so neither an
+    `or` fallback nor `.get(k, default)` catches it. It must be `json.loads`-ed
+    first and only then checked for emptiness, and the 6 suites backfilled if it
+    is empty — the model layer is the last line of defence, making "empty"
+    illegal at the type level.
     """
     with pytest.raises(ValidationError):
         _queue_task(env_list=[])
 
 
 def test_env_list_must_be_a_list_not_a_json_string() -> None:
-    """`env_list` 是数组，**不是 JSON 字符串**。
+    """`env_list` is an array, **not a JSON string**.
 
-    直接迭代字符串会拆成单字符，曾把任务错报成 "invalid env names"。
-    worker 侧 `parse_env_list` 的兜底是事故遗留，不是设计 —— 后端一律给数组。
+    Iterating a string directly splits it into single characters, which once made
+    a task be misreported as "invalid env names". The fallback in the worker's
+    `parse_env_list` is a leftover from that incident, not a design — the backend
+    always gives an array.
     """
     with pytest.raises(ValidationError):
         _queue_task(env_list='["libero_spatial"]')
@@ -512,16 +554,17 @@ def _queue_task(**overrides: Any) -> s.QueueTask:
     return s.QueueTask.model_validate(payload)
 
 
-# --- 出分入口的四道检查（事故：samples=-5 + 1 个 suite 直接夺擂） ---
+# --- the four checks at the scoring entry point (incident: samples=-5 plus a
+#     single suite dethroning the champion outright) ---
 
 
 def test_bool_cannot_masquerade_as_a_score() -> None:
-    """`{"score": true}` 必须被拒 —— **两道锁都要在**。
+    """`{"score": true}` must be rejected — **both locks have to be there**.
 
-    Python 里 `isinstance(True, int)` 是 True，所以「score 是数字」这条检查
-    如果写成 `isinstance(x, (int, float))` 就漏得掉。
-    而 pydantic 在 lax 模式下会先把 `true` 转成 `1.0`（实测），
-    所以模型上必须是 `StrictFloat`、且原始 JSON 还要过一遍 `check_env_scores`。
+    In Python `isinstance(True, int)` is True, so the check "score is a number"
+    misses it if it is written as `isinstance(x, (int, float))`. And pydantic in
+    lax mode converts `true` into `1.0` first (measured), so the model has to use
+    `StrictFloat` *and* the raw JSON still has to go through `check_env_scores`.
     """
     with pytest.raises(ValidationError):
         s.EnvScore.model_validate({"env_name": "e", "score": True, "samples": 1})
@@ -533,10 +576,11 @@ def test_bool_cannot_masquerade_as_a_score() -> None:
 
 
 def test_strict_score_still_accepts_json_integers() -> None:
-    """`StrictFloat` 不能误伤 worker 真会发的整数。
+    """`StrictFloat` must not hit the integers the worker really does send.
 
-    实测 pydantic strict 模式对 int→float 是放行的；worker 的
-    `total_score: 0` / `score: 1` 必须照收，否则出分路径直接断。
+    Measured: pydantic's strict mode does let int→float through; the worker's
+    `total_score: 0` / `score: 1` must be accepted as they are, otherwise the
+    scoring path breaks outright.
     """
     assert s.EnvScore.model_validate(
         {"env_name": "e", "score": 1, "samples": 100}
@@ -544,14 +588,17 @@ def test_strict_score_still_accepts_json_integers() -> None:
 
 
 def test_check_env_scores_rejects_nan_out_of_range_and_bad_samples() -> None:
-    """NaN / 越界 / 负 samples 全部带稳定 code `INVALID_SCORE`。
+    """NaN / out of range / negative samples all carry the stable code
+    `INVALID_SCORE`.
 
-    NaN 必须**单独拦**：它和任何数比较都是 False，`0 <= x <= 1` 漏得掉。
-    历史代价是 `{"score": 99.0, "samples": -5}` + 只交 1 个 suite → 200 →
-    直接夺擂拿 7% 权重。
+    NaN must be **caught separately**: any comparison with it is False, so
+    `0 <= x <= 1` misses it. The historical price was
+    `{"score": 99.0, "samples": -5}` plus submitting only 1 suite → 200 →
+    dethroning the champion outright and taking 7% of the weight.
     """
-    # `check_env_scores` 收的是**原始 JSON**，所以合法输入本来就包含
-    # 「根本不是 list」这种形状 —— 类型标 object 是故意的，不是偷懒。
+    # `check_env_scores` takes the **raw JSON**, so its legal inputs include
+    # shapes like "not even a list" — typing it as object is deliberate, not
+    # laziness.
     bad_payloads: list[object] = [
         [{"env_name": "e", "score": math.nan, "samples": 1}],
         [{"env_name": "e", "score": 99.0, "samples": 1}],
@@ -571,28 +618,33 @@ def test_check_env_scores_rejects_nan_out_of_range_and_bad_samples() -> None:
 
 
 def test_check_env_scores_accepts_zero_success_rate() -> None:
-    """成功率为零是**有效分数**，不是失败。`success` 的语义是「跑完了协议」。"""
+    """A zero success rate is a **valid score**, not a failure. The meaning of
+    `success` is "the protocol ran to completion"."""
     s.check_env_scores([{"env_name": "e", "score": 0.0, "samples": 500}])
 
 
 def test_required_envs_gate_is_six_not_four() -> None:
-    """必需 suite 是 **6 个不是 4 个**。
+    """The required suites are **6, not 4**.
 
-    worker 的 `--benchmark libero` profile 只产出 4 个 base env：
-    6-env gate 会拒它，4-env gate 会**收下** —— 而 4 个 suite 的均值和 6 个的均值
-    不可比，混进同一张榜就是送分。这正是这条校验存在的全部理由。
+    The worker's `--benchmark libero` profile produces only 4 base envs: a 6-env
+    gate rejects it, a 4-env gate **accepts** it — and the mean over 4 suites is
+    not comparable with the mean over 6, so mixing them into the same
+    leaderboard is handing out free points. That is the entire reason this check
+    exists.
     """
     assert len(REQUIRED_ENVS) == 6
     s.check_required_envs(_full_env_scores())
     with pytest.raises(s.ContractError) as exc:
         s.check_required_envs(_full_env_scores()[:4])
     assert exc.value.code == s.CODE_MISSING_ENVS
-    # 缺的名字要写进 message，矿工才知道自己少交了什么。
+    # The missing names have to go into the message, otherwise the miner cannot
+    # know what they failed to submit.
     assert "libero" in str(exc.value)
 
 
 def test_required_envs_gate_tolerates_garbage_shapes() -> None:
-    """非法形状不该在这里抛 `TypeError` —— 它只负责回答「齐没齐」。"""
+    """An illegal shape must not raise `TypeError` here — this function only
+    answers "is the set complete or not"."""
     with pytest.raises(s.ContractError):
         s.check_required_envs("nope")
     with pytest.raises(s.ContractError):
@@ -600,11 +652,13 @@ def test_required_envs_gate_tolerates_garbage_shapes() -> None:
 
 
 def test_score_submission_keeps_total_score_verbatim() -> None:
-    """`total_score` **原样存，不许重算**。
+    """`total_score` is **stored verbatim and must not be recomputed**.
 
-    worker 按 profile 权重加权算出来（`libero_plus` 的 `PLUS_SUITE_TASK_COUNTS`
-    不等权），核对用 `abs_tol=1e-9` 逐位比。后端一重算两个值就不相等 →
-    核对永远失败 → 每次超时/5xx 都重复 POST。
+    The worker computes it weighted by the profile weights (the
+    `PLUS_SUITE_TASK_COUNTS` of `libero_plus` are not equal weights), and the
+    cross-check compares digit by digit with `abs_tol=1e-9`. The moment the
+    backend recomputes it the two values differ → the cross-check fails forever →
+    every timeout / 5xx leads to another repeated POST.
     """
     body = {
         "success": True,
@@ -617,10 +671,11 @@ def test_score_submission_keeps_total_score_verbatim() -> None:
 
 
 def test_env_score_echoes_base_suite_and_perturbation() -> None:
-    """`base_suite` / `perturbation` 必须**原样回显**。
+    """`base_suite` / `perturbation` must be **echoed back verbatim**.
 
-    worker 的 `remote_score_matches` 逐条比对它们。被当作未声明的额外字段丢掉的话，
-    本地有值 / 远端 None → 核对失败 → 重复 POST。
+    The worker's `remote_score_matches` compares them entry by entry. If they get
+    dropped as undeclared extra fields, the local side has a value while the
+    remote side is None → the cross-check fails → a repeated POST.
     """
     parsed = s.ScoreSubmission.model_validate(
         {
@@ -643,10 +698,12 @@ def test_env_score_echoes_base_suite_and_perturbation() -> None:
 
 
 def test_unknown_payload_fields_are_ignored_not_rejected() -> None:
-    """评测方加一个新字段**不该**是销毁 GPU 工时的按钮。
+    """An evaluator adding a new field **must not** be the button that destroys
+    GPU hours.
 
-    4xx 对 worker 是 `permanent` → `abandoned` → 丢弃一次完整评测结果
-    （8 小时 GPU 时间）。所以 extra 必须是 ignore，不许改成 forbid。
+    A 4xx means `permanent` → `abandoned` for the worker → a complete evaluation
+    result is thrown away (8 hours of GPU time). So extra must be ignore, and
+    must not be changed to forbid.
     """
     parsed = s.ScoreSubmission.model_validate(
         {
@@ -660,10 +717,12 @@ def test_unknown_payload_fields_are_ignored_not_rejected() -> None:
 
 
 def test_score_accepted_carries_the_terminal_guard_flag() -> None:
-    """终态守卫命中时是 **200 + `ignored=True`**，不是 4xx 也不是 5xx。
+    """When the terminal-state guard fires the answer is **200 plus
+    `ignored=True`**, neither a 4xx nor a 5xx.
 
-    5xx 会让 worker 无限退避重试、一直卡在这个永远不会再有效的任务上领不到新活；
-    200 是唯一让它「记为已提交、继续往下走」的答案。
+    A 5xx makes the worker retry with unbounded backoff, staying stuck on a task
+    that will never be valid again and never picking up new work; 200 is the only
+    answer that makes it "record this as submitted and move on".
     """
     accepted = s.ScoreAccepted(
         task_id="task_x", ignored=True, message="superseded, discarded"
@@ -672,7 +731,8 @@ def test_score_accepted_carries_the_terminal_guard_flag() -> None:
     assert accepted.ignored is True
 
 
-# --- 进度上报（ZCY-158 词表 + 事故 ⑧ detail 被挑键） ---
+# --- progress reporting (the ZCY-158 vocabulary plus incident ⑧, where keys
+#     were cherry-picked out of detail) ---
 
 
 @pytest.mark.parametrize(
@@ -680,31 +740,35 @@ def test_score_accepted_carries_the_terminal_guard_flag() -> None:
     [
         "downloading",
         "prechecking",
-        "precheck",  # 前端 `QueueProgressStage` 里的写法
-        "evaluating",  # worker 内部词
-        "running",  # 公开文档 SUBNET_OVERVIEW.md §6 用的词
-        "RUNNING",  # 旧实现 .strip().lower()
+        "precheck",  # the spelling in the frontend `QueueProgressStage`
+        "evaluating",  # the worker's internal word
+        "running",  # the word used by the public doc SUBNET_OVERVIEW.md §6
+        "RUNNING",  # the old implementation did .strip().lower()
         "  running  ",
-        "benchmark_running",  # 库里的存储形态
+        "benchmark_running",  # the stored form in the database
     ],
 )
 def test_progress_accepts_every_partys_spelling(word: str) -> None:
-    """四方词表全收下 —— 少收一个就是 400。
+    """All four parties' vocabularies are accepted — accepting one fewer means a
+    400.
 
-    而 `_report_progress` 是 best-effort（吞掉 `BackendError` 只打 warning），
-    **400 不会被任何人发现**，进度条就那么消失了（2026-08-14 实际发生）。
+    And `_report_progress` is best-effort (it swallows `BackendError` and only
+    logs a warning), so **the 400 is not discovered by anyone** and the progress
+    bar just disappears (this actually happened on 2026-08-14).
     """
     update = s.ProgressUpdate.from_payload({"task_id": "t", "stage": word})
     assert update.stage in ALL_STAGES
 
 
 def test_progress_status_wins_over_stage() -> None:
-    """`status` 与 `stage` 都接受，**`status` 优先**（既有调用方行为不变）。"""
+    """Both `status` and `stage` are accepted, and **`status` wins** (the
+    behaviour of existing callers is unchanged)."""
     update = s.ProgressUpdate.from_payload(
         {"task_id": "t", "status": "downloading", "stage": "running"}
     )
     assert update.stage == "downloading"
-    # 空 `status` 不该把 `stage` 顶掉 —— 那正是 `Unknown status: ""` 的来历。
+    # An empty `status` must not displace `stage` — that is precisely where
+    # `Unknown status: ""` came from.
     fallback = s.ProgressUpdate.from_payload(
         {"task_id": "t", "status": "  ", "stage": "running"}
     )
@@ -712,10 +776,12 @@ def test_progress_status_wins_over_stage() -> None:
 
 
 def test_progress_rejects_unknown_and_missing_stage() -> None:
-    """未知 / 空 stage → `INVALID_STAGE`，**不是默认空串**。
+    """An unknown / empty stage → `INVALID_STAGE`, **not a default empty
+    string**.
 
-    放宽成默认空串的后果是：打错字的 stage 静默入库、前端渲染不出进度条，
-    而且没有任何人会发现。
+    The consequence of relaxing this to a default empty string is: a mistyped
+    stage lands in the database silently, the frontend renders no progress bar,
+    and nobody at all finds out.
     """
     bodies = (
         {"task_id": "t"},
@@ -729,10 +795,13 @@ def test_progress_rejects_unknown_and_missing_stage() -> None:
 
 
 def test_progress_done_and_failed_are_the_known_time_bomb() -> None:
-    """worker 的 `_PROGRESS_STAGE_MAP` 里有 `done` / `failed`，后端词表里没有。
+    """The worker's `_PROGRESS_STAGE_MAP` has `done` / `failed`; the backend
+    vocabulary does not.
 
-    当前 `worker.py` 只用三个词所以没触发。**这是一颗定时炸弹**：评测方哪天上报
-    终态就 400。这条测试钉住「今天确实是 400」，改这个行为要连着 worker 一起改。
+    Today's `worker.py` only uses three words, so it has not been triggered.
+    **This is a time bomb**: the day an evaluator reports a terminal state it is
+    a 400. This test pins down "today it really is a 400"; changing that
+    behaviour means changing the worker along with it.
     """
     for word in ("done", "failed"):
         with pytest.raises(s.ContractError):
@@ -740,30 +809,37 @@ def test_progress_done_and_failed_are_the_known_time_bomb() -> None:
 
 
 def test_progress_from_payload_reraises_non_contract_errors() -> None:
-    """不是 stage 问题的校验失败要原样抛出，不许伪装成 `INVALID_STAGE`。"""
+    """A validation failure that is not a stage problem must be raised as it is,
+    and must not be disguised as `INVALID_STAGE`."""
     with pytest.raises(ValidationError):
         s.ProgressUpdate.from_payload("not-a-dict")  # type: ignore[arg-type]
 
 
 def test_progress_model_normalizes_even_when_fastapi_parses_it() -> None:
-    """归一化在**模型层**，不在路由里。
+    """Normalization happens in the **model layer**, not in the route.
 
-    两条路径（`/api/benchmark-progress` 与 `/api/v1/benchmark/progress`）无论谁先接、
-    是直接交给 FastAPI 还是走 `from_payload`，都不可能各自复制一份再漂掉。
+    Whichever of the two paths (`/api/benchmark-progress` and
+    `/api/v1/benchmark/progress`) receives it first, and whether it is handed
+    straight to FastAPI or goes through `from_payload`, it is impossible for each
+    of them to keep its own copy and then drift.
     """
     direct = s.ProgressUpdate.model_validate({"task_id": "t", "stage": "evaluating"})
     assert direct.stage == "running"
-    # 幂等：已经是规范词的输入原样通过。
+    # Idempotent: input that is already a canonical word passes through
+    # unchanged.
     assert s.ProgressUpdate.model_validate(direct.model_dump()).stage == "running"
 
 
 def test_progress_detail_is_passed_through_whole() -> None:
-    """`detail` 对象**整个原样存** —— 事故 ⑧ 的守卫。
+    """The `detail` object is **stored whole and verbatim** — the guard for
+    incident ⑧.
 
-    2026-08-14 的部署改成只挑 `progress` / `current_env` 两个顶层键，而 worker
-    根本不发这两个字段，于是库里永远是 `{"progress": null, "current_env": null}`。
-    队列页从 `7/16 SUITES / libero_goal_lan` 变成光秃秃的 `EVALUATING`，
-    后端也因此答不上「任务跑到哪一步」。
+    The 2026-08-14 deployment changed it to cherry-pick only the two top-level
+    keys `progress` / `current_env`, while the worker does not send those two
+    fields at all, so the database forever held
+    `{"progress": null, "current_env": null}`. The queue page went from
+    `7/16 SUITES / libero_goal_lan` to a bare `EVALUATING`, and the backend could
+    no longer answer "how far has the task got".
     """
     detail = {
         "suites_done": 7,
@@ -780,55 +856,64 @@ def test_progress_detail_is_passed_through_whole() -> None:
 
 
 def test_progress_detail_falls_back_to_flat_top_level_fields() -> None:
-    """`detail` 不是对象 / 是 None / 缺失 → 退回顶层扁平写法，**不抛异常**。"""
+    """`detail` is not an object / is None / is missing → fall back to the flat
+    top-level form, **without raising**."""
     assert s.extract_progress_detail({"detail": "garbage", "suites_done": 2}) == {
         "suites_done": 2
     }
     assert s.extract_progress_detail({"detail": None, "episodes_total": 100}) == {
         "episodes_total": 100
     }
-    # `detail` 优先，顶层独有的键补进来。
+    # `detail` wins, and keys that only exist at the top level are merged in.
     assert s.extract_progress_detail(
         {"detail": {"suites_done": 9}, "suites_done": 1, "episodes_done": 40}
     ) == {"suites_done": 9, "episodes_done": 40}
 
 
 def test_progress_detail_empty_is_an_empty_object() -> None:
-    """完全没有进度信息 → **空对象 `{}`**，绝不再产生 `{"progress":null,...}` 空壳。"""
+    """No progress information at all → an **empty object `{}`**; never again
+    produce the empty shell `{"progress":null,...}`."""
     assert s.extract_progress_detail({"task_id": "t"}) == {}
 
 
 def test_progress_response_cannot_disagree_with_itself() -> None:
-    """响应同时给 `status` 和 `stage`，且**不可能不一致**。
+    """The response gives both `status` and `stage`, and they **cannot
+    disagree**.
 
-    前端类型叫 `stage`、旧调用方读 `status`，只给一个就总有一方拿到 `undefined`
-    —— 这正是 ZCY-158 的形状。`status` 是 computed_field，不一致在类型层不可表达。
+    The frontend type is called `stage` while old callers read `status`; giving
+    only one of them always leaves one side with `undefined` — which is exactly
+    the shape of ZCY-158. `status` is a computed_field, so disagreement is
+    unrepresentable at the type level.
     """
     accepted = s.ProgressAccepted(task_id="t", stage="running")
     dumped = accepted.model_dump()
     assert dumped["status"] == dumped["stage"] == "running"
     assert dumped["success"] is True
-    # 想手工把两者掰开也做不到：`status` 不是可赋值字段，传进来会被忽略。
+    # Prying the two apart by hand does not work either: `status` is not an
+    # assignable field, so passing it in is ignored.
     forced = s.ProgressAccepted(task_id="t", stage="running", status="downloading")  # type: ignore[call-arg]
     assert forced.status == "running"
 
 
-# --- 落库核对 / 读路径 ---
+# --- persistence cross-check / read path ---
 
 
 def test_submission_record_keeps_both_hotkey_spellings() -> None:
-    """`hotkey` 与 `miner_hotkey` 双写，**一个都不能删**（worker 两个都认）。"""
+    """`hotkey` and `miner_hotkey` are both written, and **neither may be
+    deleted** (the worker recognises both)."""
     record = _submission_record()
     assert record.hotkey == record.miner_hotkey
 
 
 def test_submission_record_result_is_none_when_not_scored_yet() -> None:
-    """还没评完时 `result` 是 `null`。
+    """While the evaluation is not finished, `result` is `null`.
 
-    库里是 `{}` 或 `""`，出口归一成 `null` —— worker 的核对因此返回 False，
-    这是**正确**结果：确实没落库。
-    ⚠️ 反过来，**不许**给 `success` / `total_score` 加默认值让 `{}` 也能解析成功，
-    那等于凭空造一个 `total_score=0.0` 出来。
+    The database holds `{}` or `""`, and the exit point normalizes it to `null` —
+    so the worker's cross-check returns False, and that is the **correct** result:
+    nothing really was persisted.
+    ⚠️ Conversely, defaults **must not** be added to `success` / `total_score` so
+    that `{}` also parses successfully; that would be conjuring a
+    `total_score=0.0` out of nowhere.
     """
     assert _submission_record().result is None
     with pytest.raises(ValidationError):
@@ -836,11 +921,13 @@ def test_submission_record_result_is_none_when_not_scored_yet() -> None:
 
 
 def test_read_path_tolerates_historical_dirty_scores() -> None:
-    """读路径**不加值域约束** —— 生产库里真的有 `score=99.0` 这种行。
+    """The read path carries **no range constraint** — the production database
+    really does contain rows like `score=99.0`.
 
-    2026-08-14 那次就是这么进去的。给读模型加 `le=1.0` 等于让「读一条历史脏数据」
-    变成 500，而 5xx 对 worker 是「重复 POST」的按钮。
-    值域检查留在写路径的 `check_env_scores()` 上，一处守卫守在边界。
+    That is how the 2026-08-14 one got in. Adding `le=1.0` to the read model
+    would turn "reading one historical dirty row" into a 500, and a 5xx is the
+    "repeat the POST" button for the worker. The range check stays on
+    `check_env_scores()` on the write path: one guard, standing at the boundary.
     """
     record = _submission_record(
         result={
@@ -851,37 +938,45 @@ def test_read_path_tolerates_historical_dirty_scores() -> None:
     )
     assert record.result is not None
     assert record.result.env_scores[0].score == 99.0
-    # 同一份数据走写路径必须被拒。
+    # The same data going through the write path must be rejected.
     with pytest.raises(s.ContractError):
         s.check_env_scores([{"env_name": "e", "score": 99.0, "samples": -5}])
 
 
 def test_worker_status_words_are_not_what_the_backend_writes() -> None:
-    """🔴 钉住那条**已确认的静默故障**：两套词表今天对不上。
+    """🔴 Pins down the **confirmed silent failure**: the two vocabularies do not
+    match today.
 
-    worker 的落库核对只接受 `done` / `scored` / `failed`，而后端写的是
-    `evaluated` / `eval_failed`，0002 之后 `done` 已被 CHECK 禁止。
-    推断核对**恒为 False** → 每次 POST /score 超时或 5xx 都走完整重试路径，
-    而这条链路上没有任何告警。
+    The worker's persistence cross-check only accepts `done` / `scored` /
+    `failed`, while the backend writes `evaluated` / `eval_failed`, and since
+    0002 `done` has been forbidden by a CHECK constraint. It follows that the
+    cross-check is **always False** → every timeout or 5xx on POST /score goes
+    through the full retry path, and there is no alert anywhere along that chain.
 
-    这条测试**不主张哪一边对**，它主张「这件事今天确实成立」——
-    等 spec 07 §10 Q2 拍板后，改的是这条测试和 `worker_status_alias` 的接线。
+    This test **does not claim which side is right**, it claims "this is really
+    the case today" — once spec 07 §10 Q2 is settled, what changes is this test
+    and the wiring of `worker_status_alias`.
     """
     assert s.WORKER_ACCEPTED_STATUSES & ALL_STATUSES == frozenset()
 
 
 def test_worker_status_alias_is_defined_but_deliberately_unwired() -> None:
-    """转换函数已就位、带 TODO，但**没有任何模型在调它**。
+    """The conversion function is in place, carries a TODO, but **no model calls
+    it**.
 
-    把它放在明面上而不是偷偷接进查询里：ZCY-158 的教训就是翻译表被藏在消费方
-    （worker 的 `_PROGRESS_STAGE_MAP` 至今还在），于是没人知道两边其实对不上。
+    Keeping it out in the open instead of quietly wiring it into a query: the
+    lesson of ZCY-158 is that the translation table was hidden inside the
+    consumer (the worker's `_PROGRESS_STAGE_MAP` is still there today), so nobody
+    knew the two sides did not actually match.
     """
     assert s.worker_status_alias("evaluated") == "done"
     assert s.worker_status_alias("eval_failed") == "failed"
-    # 表外的词原样返回 —— 合法性由 `ALL_STATUSES` 判，不是这个函数的事。
+    # A word outside the table is returned unchanged — legality is judged by
+    # `ALL_STATUSES`, it is not this function's business.
     assert s.worker_status_alias("superseded") == "superseded"
     assert s.worker_status_alias("whatever") == "whatever"
-    # 未接线：详情响应仍然直出库里的规范词。
+    # Not wired up: the detail response still emits the canonical word straight
+    # from the database.
     assert _submission_record(status="evaluated").status == "evaluated"
 
 
@@ -899,19 +994,22 @@ def _submission_record(**overrides: Any) -> s.SubmissionRecord:
     return s.SubmissionRecord.model_validate(payload)
 
 
-# --- 榜单 / 轮次 ---
+# --- leaderboard / rounds ---
 
 
 def test_leaderboard_row_carries_round_num() -> None:
-    """`round_num` 是生产有、新骨架漏了的那个键 —— 删掉读它的人拿 undefined。"""
+    """`round_num` is the key production has and the new skeleton dropped —
+    delete it and whoever reads it gets undefined."""
     assert _leaderboard_row().round_num == 1
 
 
 def test_champion_score_shape_matches_leaderboard_rank1() -> None:
-    """`champion.score` 是裸 float，必须能等于榜单 rank1 的 `score.mean`。
+    """`champion.score` is a bare float and must be able to equal the
+    `score.mean` of rank 1 on the leaderboard.
 
-    跨端点一致性断言 2（spec 04 §5）。这里只锁类型形状 ——
-    值相等要在后端的集成测试里断。
+    Cross-endpoint consistency assertion 2 (spec 04 §5). Only the type shape is
+    pinned down here — equality of the values has to be asserted in the backend's
+    integration tests.
     """
     row = _leaderboard_row()
     champion = s.Champion(
@@ -926,9 +1024,10 @@ def test_champion_score_shape_matches_leaderboard_rank1() -> None:
 
 
 def test_round_detail_start_and_end_stay_null() -> None:
-    """没有轮次表，`started_at` / `ends_at` 编不出来 → 恒 `null`。
+    """There is no rounds table, so `started_at` / `ends_at` cannot be made up →
+    always `null`.
 
-    **不要拿本地时间凑**。
+    **Do not fake them with local time.**
     """
     detail = s.RoundDetail(
         id=1,
@@ -943,24 +1042,29 @@ def test_round_detail_start_and_end_stay_null() -> None:
 
 
 def test_empty_database_returns_round_null_not_an_error_object() -> None:
-    """整库为空是 `{"round": null}` + 200。
+    """An empty database is `{"round": null}` plus 200.
 
-    **不是** `{"error": "no rounds found"}` + 200（用 200 表达失败，前端已被迫在
-    边界做归一化），**也不是** 404。
+    **Not** `{"error": "no rounds found"}` plus 200 (expressing failure with a
+    200 has already forced the frontend to normalize at the boundary), **and not**
+    a 404 either.
     """
     assert s.CurrentRoundResponse().model_dump() == {"round": None}
 
 
 def test_score_std_is_none_not_zero_for_single_trial() -> None:
-    """只跑过一次的提交 `std` 是 `None`，**不是 0** —— 0 会被读成「零方差」。"""
+    """For a submission that has only been run once, `std` is `None`, **not 0** —
+    0 would be read as "zero variance"."""
     assert s.ScoreStat(mean=0.5).std is None
 
 
-# --- 「没有值」不许伪装成 0 / 空串 ---
+# --- "no value" must not disguise itself as 0 / the empty string ---
 #
-# 这一组守的是同一件事：`0` 和 `""` 都是**合法取值**，拿它们当「缺值」的哨兵，
-# 消费方就再也分不开「没有」和「值恰好是这个」。而这几个字段的消费方是
-# 矿工与外部审计方 —— 分不开的后果是核对静默失败，没有任何一方会收到错误。
+# This group guards one and the same thing: `0` and `""` are both **legal
+# values**, and using them as the sentinel value for "missing" means the consumer
+# can never again tell "there is none" apart from "the value happens to be this".
+# The consumers of these particular fields are miners and external auditors — the
+# consequence of not being able to tell them apart is that the cross-check fails
+# silently, and no party receives an error.
 
 
 def _queue_status_task(**overrides: Any) -> s.QueueStatusTask:
@@ -1002,58 +1106,72 @@ def _history_item(**overrides: Any) -> s.SubmissionHistoryItem:
 
 
 def test_seed_triple_is_null_when_no_seed_was_ever_assigned() -> None:
-    """没派过种子 → `seed` / `drand_random` / `drand_round` **三个一起是 `null`**。
+    """No seed was ever dispatched → `seed` / `drand_random` / `drand_round` are
+    **all three `null` together**.
 
-    `drand_round=0` 是最锋利的那条：drand 官方 API 的 `/public/0` 返回 **200**，
-    内容是当天最新的那一轮（`latest` 的别名，2026-08-19 实测）。审计方照着查
-    不会 404，会拿到一份今天的信标，然后 `verify_seed()` 必然 False —— 而他无从
-    判断是我们作弊还是数据缺失。本包的 `seed.drand_round_url()` 对 `<= 0` 已经
-    `raise`，schemas 再把 0 发出去就是同一个包自相矛盾。
+    `drand_round=0` is the sharpest of them: the official drand API returns
+    **200** for `/public/0`, with the content of the latest round of the day (an
+    alias of `latest`, measured 2026-08-19). An auditor querying it does not get
+    a 404, they get today's beacon, and then `verify_seed()` is necessarily False
+    — and they have no way to tell whether we cheated or the data is missing.
+    This package's `seed.drand_round_url()` already raises for `<= 0`, so schemas
+    emitting a 0 would mean one and the same package contradicting itself.
 
-    `seed=0` 更隐蔽：0 是 `derive_seed()` 的合法输出（1/2³²），没法靠猜排除。
-    生产 2026-08-19 副本里 20 条 `seed=0` 全是「没派过种子」，其中 11 条已经出分
-    进过榜单 —— 它们不可复现，而响应里看不出来。
+    `seed=0` is subtler: 0 is a legal output of `derive_seed()` (1/2³²), so it
+    cannot be ruled out by guessing. In the 2026-08-19 production copy all 20
+    rows with `seed=0` are "no seed was ever dispatched", and 11 of them have
+    already been scored and appeared on the leaderboard — they are not
+    reproducible, and nothing in the response shows it.
 
-    三个必须一起：只改 `drand_round` 会发出「一个字段说没有、隔壁说有」的响应。
+    All three must go together: changing only `drand_round` would emit a response
+    where one field says there is none while the one next to it says there is.
     """
     item = _history_item()
     assert item.seed is None
     assert item.drand_random is None
     assert item.drand_round is None
     assert s.EvalEnvironment().seed is None
-    # 0 仍然是可表达的**真值** —— 这正是它不能兼任哨兵的原因，也是 `seed` 不能
-    # 像 `drand_round` 那样加 `gt=0` 的原因（那会拒掉一个真种子）。
-    # 但它必须**带齐同伴**：三元组是 `seed` 唯一的守法。
+    # 0 is still a representable **real value** — which is exactly why it cannot
+    # double as a sentinel value, and why `seed` cannot get a `gt=0` the way
+    # `drand_round` does (that would reject a real seed).
+    # But it must **bring its companions along**: the triple is the only way to
+    # guard `seed`.
     assert _history_item(seed=0, drand_random="ab", drand_round=1).seed == 0
 
 
 def test_seed_alone_is_rejected_because_zero_cannot_be_told_apart() -> None:
-    """只给 `seed` 不给同伴 → **拒绝**。这是 `seed=0` 唯一挡得住的地方。
+    """Giving `seed` without its companions → **rejected**. This is the only
+    place where `seed=0` can be stopped.
 
-    `drand_round` 能加 `gt=0`、`drand_random` 能加 `min_length=1`，
-    而 `seed` 两样都不能（0 是 `derive_seed()` 的合法输出）。所以它靠的是
-    **一致性**：`derive_seed` 的输入是 block_hash + round + drand_random，
-    真派过种子的那次三个字段必然同时有值。
+    `drand_round` can carry `gt=0` and `drand_random` can carry `min_length=1`,
+    while `seed` can carry neither (0 is a legal output of `derive_seed()`). So
+    what it relies on is **consistency**: the inputs of `derive_seed` are
+    block_hash + round + drand_random, so the time a seed really was dispatched
+    all three fields necessarily have values at once.
 
-    挡的正是生产里那 20 条的形状：`{seed: 0, drand_random: null, drand_round: null}`。
-    没有这条校验，它们会安静地序列化出去，而审计方拿 `drand_round: 0` 查 drand
-    会拿到当天最新那一轮（`/public/0` 是 `latest` 的别名）。
+    What this stops is exactly the shape of those 20 rows in production:
+    `{seed: 0, drand_random: null, drand_round: null}`. Without this check they
+    would serialize out quietly, and an auditor querying drand with
+    `drand_round: 0` would get the latest round of the day (`/public/0` is an
+    alias of `latest`).
     """
     for kwargs in (
         {"seed": 0},
         {"seed": 5, "drand_round": 7},
         {"drand_random": "ab"},
     ):
-        with pytest.raises(ValidationError, match="种子三元组"):
+        with pytest.raises(ValidationError, match="incomplete seed triple"):
             _history_item(**kwargs)
 
 
 def test_revision_is_null_when_the_commit_is_unknown() -> None:
-    """查不到 `hf_commit` → `revision` 是 `null`，**不是 `""`**。
+    """`hf_commit` cannot be found → `revision` is `null`, **not `""`**.
 
-    `revision` 的唯一来源是 40 位 commit SHA（CLI `preflight.py` 上链前强制校验），
-    所以 `""` 从来不是合法值。而 `""` 在 HF 的 URL 语义里是「默认分支」——
-    `.../tree/{revision}` 会静默跳到 main，审计方核对的就不是得分那次的权重了。
+    The only source of `revision` is the 40-character commit SHA (the CLI's
+    `preflight.py` enforces this before going on chain), so `""` has never been a
+    legal value. And in HF's URL semantics `""` means "the default branch" —
+    `.../tree/{revision}` silently lands on main, so what the auditor checks is
+    not the weights of the run that was scored.
     """
     assert s.ModelRef(name="pi0.5", hf_repo="x/y").revision is None
     assert (
@@ -1065,11 +1183,14 @@ def test_revision_is_null_when_the_commit_is_unknown() -> None:
 
 
 def test_queue_task_round_num_cannot_be_omitted() -> None:
-    """队列行的 `round_num` **必填** —— 「不知道哪一轮」不是合法状态。
+    """The `round_num` of a queue row is **required** — "which round is unknown"
+    is not a legal state.
 
-    这一处和上面几个相反：它不该有 `None` 默认值，它根本不该有默认值。
-    第 0 轮不存在，而 `0` 会被前端和矿工的 curl 当成真实轮次去过滤，
-    静默捞回空列表。生产列 `NOT NULL`、后端恒填、119 行里 0 条为 0。
+    This one is the opposite of the previous few: it should not have a `None`
+    default, it should have no default at all. There is no round 0, and `0` would
+    be taken as a real round number by the frontend and by a miner's curl and
+    used as a filter, silently fetching back an empty list. The production column
+    is `NOT NULL`, the backend always fills it, and 0 of the 119 rows are 0.
     """
     assert _queue_status_task().round_num == 1
     with pytest.raises(ValidationError):
@@ -1077,18 +1198,20 @@ def test_queue_task_round_num_cannot_be_omitted() -> None:
     assert s.QueueStatusTask.model_fields["round_num"].is_required()
 
 
-# --- 探针 ---
+# --- probes ---
 
 
 def test_liveness_status_is_a_constant() -> None:
-    """`/healthz` 的 `status` 永远是 `"ok"`，其它值不可表达。"""
+    """The `status` of `/healthz` is always `"ok"`; any other value is
+    unrepresentable."""
     assert s.LivenessResponse(round=1, netuid=80).status == "ok"
     with pytest.raises(ValidationError):
         s.LivenessResponse(round=1, netuid=80, status="degraded")  # type: ignore[arg-type]
 
 
 def test_readiness_body_shape_is_identical_for_200_and_503() -> None:
-    """就绪与不就绪**同一个形状**，调用方不该为失败准备第二套解析。"""
+    """Ready and not ready have **the same shape**; a caller should not have to
+    prepare a second parser for the failure case."""
     ready = s.ReadinessResponse(
         ready=True,
         database=s.ReadinessCheck(ok=True),
@@ -1103,25 +1226,28 @@ def test_readiness_body_shape_is_identical_for_200_and_503() -> None:
     assert set(ready.model_dump()) == set(down.model_dump())
 
 
-# --- 结构性约束 ---
+# --- structural constraints ---
 
 
 def test_models_are_frozen() -> None:
-    """响应模型建好之后不许再改。
+    """Once a response model is built it must not be modified.
 
-    这个仓库的历史问题恰恰是出口处被人手改字段（`row.pop("status")` 那一类）。
+    The historical problem of this repository is precisely fields being patched
+    by hand at the exit point (the `row.pop("status")` kind).
     """
     with pytest.raises(ValidationError):
         _leaderboard_row().rank = 2
 
 
 def test_weights_are_fractions_not_u16_integers() -> None:
-    """`/api/weights` 的值是 **0~1 的 float**，不是 u16 整数。
+    """The values of `/api/weights` are **floats in 0~1**, not u16 integers.
 
-    新骨架 `legacy.py:244` 写的是 `dict[str, int]` —— 接上真实数据的那一刻
-    Pydantic 拿 `0.9` 去满足 `int` 会 500，外部验证者的 `fetch_weights()`
-    把异常吞成 `{}` → 发不出 `set_weights` → **全网排放停摆，只有一行 warning**。
-    u16 归一化在调用方（`validator.normalize_weights`）。
+    The new skeleton's `legacy.py:244` writes `dict[str, int]` — the moment real
+    data is wired in, Pydantic trying to satisfy `int` with `0.9` gives a 500, an
+    external validator's `fetch_weights()` swallows the exception into `{}` → no
+    `set_weights` can be sent → **emissions across the whole network come to a
+    halt, with only a single warning line**. The u16 normalization happens in the
+    caller (`validator.normalize_weights`).
     """
     weights: s.Weights = {"5HTwty": 0.9, "5FQxZ": 0.07, "5DoaV8": 0.02, "5Gpih1": 0.01}
     assert all(isinstance(v, float) for v in weights.values())
@@ -1130,9 +1256,11 @@ def test_weights_are_fractions_not_u16_integers() -> None:
 
 
 def test_leaderboard_generated_at_is_the_only_moving_field() -> None:
-    """不变量 4：同一份数据两次请求，除 `generated_at` 外逐字段相等。
+    """Invariant 4: two requests over the same data are field-by-field equal
+    except for `generated_at`.
 
-    这里锁的是**形状**（只有这一个字段带服务器时刻）；真正的幂等断言在后端。
+    What is pinned down here is the **shape** (only this one field carries a
+    server timestamp); the real idempotency assertion lives in the backend.
     """
     keys = _RESPONSE_KEYS[s.LeaderboardResponse]
     assert "generated_at" in keys
@@ -1147,14 +1275,18 @@ def test_leaderboard_generated_at_is_the_only_moving_field() -> None:
 
 
 def test_miner_facing_imports_do_not_require_pydantic() -> None:
-    """矿工那几个模块 **不得**拖进 pydantic。
+    """The miner-facing modules **must not** drag pydantic in.
 
-    这是把 pydantic 放进 `[schemas]` optional-dependency 的全部意义：矿工装这个包
-    只为推导 seed 和解 commitment，不该在 GPU 机器上编译一个 pydantic-core 轮子。
-    承诺靠「`__init__.py` 不 re-export 任何东西」成立 —— 这条测试钉住它。
+    This is the entire point of putting pydantic into the `[schemas]`
+    optional-dependency: a miner installs this package only to derive seeds and
+    decode commitments, and should not have to compile a pydantic-core wheel on a
+    GPU machine. The promise holds because "`__init__.py` re-exports nothing" —
+    this test pins that down.
 
-    必须开子进程：本文件顶上已经 `from openroboto_protocol import schemas`，
-    当前解释器里 `sys.modules` 早就有 pydantic 了，在进程内断言等于自欺。
+    A subprocess is mandatory: the top of this file already does
+    `from openroboto_protocol import schemas`, so pydantic has long been in
+    `sys.modules` of the current interpreter, and asserting in-process would be
+    fooling ourselves.
     """
     probe = (
         "import sys; import openroboto_protocol, openroboto_protocol.seed, "
@@ -1167,16 +1299,18 @@ def test_miner_facing_imports_do_not_require_pydantic() -> None:
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
-    assert result.stdout.strip() == "[]", f"pydantic 被拖进来了: {result.stdout}"
+    assert result.stdout.strip() == "[]", f"pydantic got pulled in: {result.stdout}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. 响应信封（ADR 02）
+# 4. Response envelopes (ADR 02)
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# 这一组锁的是**信封本身**的四条规则，不是某个端点的字段。三条已经在类型层不可
-# 表达（见 `schemas.py` 里那段注释），这里做的是回归护栏：有人把 `Meta.page`
-# 加回去、给 `retryable` 补个默认值、或者顺手把探针也套上信封时，这里红。
+# What this group pins down are the four rules of **the envelope itself**, not
+# the fields of some endpoint. Three of them are already unrepresentable at the
+# type level (see that comment in `schemas.py`); what happens here is the
+# regression guard: it goes red when someone adds `Meta.page` back, gives
+# `retryable` a default, or wraps the probes in an envelope while they are at it.
 
 
 def _meta() -> s.Meta:
@@ -1192,11 +1326,13 @@ def _miner() -> s.MinerRef:
 
 
 def test_success_response_always_has_data_and_never_error() -> None:
-    """成功响应**一定**有 `data`、**一定**没有 `error`。
+    """A success response **always** has `data` and **never** has `error`.
 
-    `code: 0` 表示成功是个约定，不看文档看不出来；`data` / `error` 二选一是
-    **结构上**的区分。这里连「两个都有」这种状态都构造不出来 —— `Envelope`
-    根本没有 `error` 字段，硬塞进来会被 `Contract` 的 `extra=ignore` 丢掉。
+    `code: 0` meaning success is a convention you cannot see without reading the
+    documentation; one-of `data` / `error` is a **structural** distinction. Here
+    even the state "both present" cannot be constructed — `Envelope` simply has
+    no `error` field, and forcing one in gets dropped by `Contract`'s
+    `extra=ignore`.
     """
     body = s.Envelope[s.MinerRef](data=_miner(), meta=_meta()).model_dump(mode="json")
     assert set(body) == {"data", "meta"}
@@ -1212,11 +1348,13 @@ def test_success_response_always_has_data_and_never_error() -> None:
 
 
 def test_error_response_always_has_error_and_never_data() -> None:
-    """错误响应反之。`retryable` **没有默认值**，必须显式想一次。
+    """An error response is the other way round. `retryable` has **no default**;
+    it has to be thought about explicitly, once.
 
-    默认 `False` 等于替每个忘了想的人选了「不可重试」那一边 —— 而那一边的代价是
-    worker 把一次链 RPC 抖动当成永久失败，销毁一份 8 小时的评测结果，
-    矿工烧掉的 TAO 不退。
+    Defaulting to `False` means choosing the "not retryable" side on behalf of
+    everyone who forgot to think about it — and the price of that side is the
+    worker treating one flaky chain RPC call as a permanent failure, destroying
+    an 8-hour evaluation result, with no refund of the TAO the miner burned.
     """
     body = s.ErrorEnvelope(
         error=s.ErrorBody(
@@ -1232,15 +1370,19 @@ def test_error_response_always_has_error_and_never_data() -> None:
 
 
 def test_only_validation_errors_carry_fields() -> None:
-    """`fields` **只在 422 的那个子类上**，普通错误连这个键都不出现。
+    """`fields` lives **only on the 422 subclass**; on an ordinary error the key
+    does not even appear.
 
-    ADR 02 §8 未决问题 ② 的落地形状（2026-08-18）。走子类而不是
-    `fields: … | None = None`：可选字段要靠每个出口记得 `exclude_none`，
-    漏一个就多吐 `"fields": null`，而忘一次是静默的 —— 和 `meta.page` 走
-    `ListMeta` 子类是同一个理由。
+    This is the landed shape of ADR 02 §8 open question ② (2026-08-18). It goes
+    through a subclass rather than `fields: … | None = None`: an optional field
+    relies on every exit point remembering `exclude_none`, and missing one emits
+    an extra `"fields": null`, and forgetting once is silent — the same reason
+    `meta.page` goes through the `ListMeta` subclass.
 
-    这条同时钉住**基类没被顺手改**：`ValidationErrorBody` 继承 `ErrorBody`，
-    下面那个键集断言是继承展开后的，基类少一个字段这里就红。
+    This also pins down that **the base class was not modified along the way**:
+    `ValidationErrorBody` inherits from `ErrorBody`, and the key-set assertion
+    below is the inherited expansion, so one missing field on the base class goes
+    red right here.
     """
     plain = s.ErrorEnvelope(
         error=s.ErrorBody(code="NOT_FOUND", message="no", retryable=False),
@@ -1251,7 +1393,7 @@ def test_only_validation_errors_carry_fields() -> None:
     invalid = s.ValidationErrorEnvelope(
         error=s.ValidationErrorBody(
             code="VALIDATION_ERROR",
-            message="请求体校验失败（1 个字段）",
+            message="request body validation failed (1 field)",
             retryable=False,
             fields=[
                 {"loc": "body.env_scores", "msg": "field required", "type": "missing"}
@@ -1263,8 +1405,9 @@ def test_only_validation_errors_carry_fields() -> None:
     assert "data" not in invalid
     assert invalid["error"]["fields"][0]["loc"] == "body.env_scores"
 
-    # `fields` 必填 —— 忘了带的 422 构造不出来，而「422 没有逐字段信息」
-    # 正是这个子类存在的全部理由。
+    # `fields` is required — a 422 that forgot to carry it cannot be
+    # constructed, and "a 422 with no per-field information" is the entire
+    # reason this subclass exists.
     with pytest.raises(ValidationError):
         s.ValidationErrorBody(  # type: ignore[call-arg]
             code="VALIDATION_ERROR", message="x", retryable=False
@@ -1272,10 +1415,13 @@ def test_only_validation_errors_carry_fields() -> None:
 
 
 def test_request_id_is_on_every_response_including_errors() -> None:
-    """`meta.request_id` 恒存在。**错误响应上尤其存在** —— 那正是要查的那个。
+    """`meta.request_id` always exists. **Especially on error responses** — that
+    is precisely the one that has to be looked up.
 
-    必填字段，缺了整个响应构造不出来。给它默认值等于允许「查不到的那个响应」
-    存在，而出问题时用户能贴过来的只有它。
+    It is a required field, and without it the whole response cannot be
+    constructed. Giving it a default means allowing "the response that cannot be
+    looked up" to exist, while it is the only thing a user can paste back when
+    something goes wrong.
     """
     with pytest.raises(ValidationError):
         s.Meta()  # type: ignore[call-arg]
@@ -1295,12 +1441,15 @@ def test_request_id_is_on_every_response_including_errors() -> None:
 
 
 def test_page_meta_appears_only_on_list_endpoints() -> None:
-    """`meta.page` **只有列表端点有**，单对象端点连这个键都不出现。
+    """`meta.page` exists **only on list endpoints**; on a single-object endpoint
+    the key does not even appear.
 
-    不是靠 `exclude_none`（那要求每个路由记得写 `response_model_exclude_none=True`，
-    漏一个就吐 `"page": null`，而且是静默的），是靠 `Envelope.meta` 的声明类型
-    `Meta` 里**根本没有这个字段**。下面第二段证明：就算硬塞一个 `ListMeta` 进单对象
-    信封，序列化仍按声明类型走。
+    Not by way of `exclude_none` (that requires every route to remember to write
+    `response_model_exclude_none=True`, and missing one emits `"page": null`, and
+    silently at that), but because the declared type of `Envelope.meta`, `Meta`,
+    **simply does not have this field**. The second part below proves it: even
+    forcing a `ListMeta` into a single-object envelope, serialization still
+    follows the declared type.
     """
     assert "page" not in _serialized_keys(s.Meta)
     assert "page" in _serialized_keys(s.ListMeta)
@@ -1325,7 +1474,8 @@ def test_page_meta_appears_only_on_list_endpoints() -> None:
 
 @dataclass(frozen=True, slots=True)
 class _RepoPage:
-    """`app/repositories/pagination.py:Page` 的形状（dataclass，items 是 tuple）。"""
+    """The shape of `app/repositories/pagination.py:Page` (a dataclass, items is a
+    tuple)."""
 
     items: tuple[int, ...]
     total: int
@@ -1334,7 +1484,8 @@ class _RepoPage:
 
 
 class _ApiPage(BaseModel):
-    """`app/api/schemas.py:Page` 的形状（pydantic 模型，items 是 list）。"""
+    """The shape of `app/api/schemas.py:Page` (a pydantic model, items is a
+    list)."""
 
     items: list[int]
     total: int
@@ -1345,23 +1496,27 @@ class _ApiPage(BaseModel):
 @pytest.mark.parametrize(
     ("count", "total", "offset", "expected"),
     [
-        (50, 137, 0, True),  # 第一页，后面还有
-        (37, 137, 100, False),  # 末页正好取完
-        (0, 0, 0, False),  # 空列表不是「还有下一页」
-        (50, 50, 0, False),  # 一页装得下全部
+        (50, 137, 0, True),  # first page, more to come
+        (37, 137, 100, False),  # last page, exactly exhausted
+        (0, 0, 0, False),  # an empty list is not "there is a next page"
+        (50, 50, 0, False),  # one page holds everything
     ],
 )
 def test_has_more_is_computed_in_exactly_one_place(
     count: int, total: int, offset: int, expected: bool
 ) -> None:
-    """`has_more` 由 `PageMeta.of()` 算，调用方不许自己拼这个表达式。
+    """`has_more` is computed by `PageMeta.of()`; callers must not assemble the
+    expression themselves.
 
-    `offset + len(items) < total` 复制到 8 个列表端点上，写错一个就是静默翻页丢行
-    —— 而翻页丢行没有任何一方会报错，矿工只会来问「dashboard 没有我的提交」
-    （ZCY-162 的原始形状）。
+    Copying `offset + len(items) < total` into 8 list endpoints means that
+    getting one of them wrong silently drops rows while paging — and dropping
+    rows while paging raises an error for no party at all; the miner just turns
+    up asking "my submission is not on the dashboard" (the original shape of
+    ZCY-162).
 
-    两种 `Page` 都得能直接喂进来：仓储层那个是 dataclass、API 层那个是 pydantic
-    模型，`PageLike` 是结构类型，两个都不用改。
+    Both kinds of `Page` have to be feedable directly: the repository-layer one
+    is a dataclass and the API-layer one is a pydantic model; `PageLike` is a
+    structural type, so neither of them has to change.
     """
     items = tuple(range(count))
     repo = _RepoPage(items=items, total=total, limit=50, offset=offset)
@@ -1371,12 +1526,16 @@ def test_has_more_is_computed_in_exactly_one_place(
 
 
 def test_probes_are_never_enveloped() -> None:
-    """探针是**唯一的例外**：`/healthz` `/readyz` 不套信封，`/metrics` 同理。
+    """The probes are **the only exception**: `/healthz` and `/readyz` are not
+    wrapped in an envelope, and the same goes for `/metrics`.
 
-    它们的消费方是 PM2 / 负载均衡 / Prometheus，套了信封对方直接解析不了 ——
-    健康检查解不出来的后果是**流量被摘掉或进程被反复重启**，比字段错还急。
-    `/metrics` 在协议包里没有模型（它是 `text/plain` 的 Prometheus 文本格式，
-    见后端 `app/core/metrics.py`），这条只能钉住两个探针。
+    Their consumers are PM2 / the load balancer / Prometheus, and with an
+    envelope they cannot parse it at all — the consequence of an unparseable
+    health check is **traffic being pulled or the process being restarted over
+    and over**, which is even more urgent than a wrong field. `/metrics` has no
+    model in the protocol package (it is Prometheus text format as `text/plain`,
+    see the backend's `app/core/metrics.py`), so this test can only pin down the
+    two probes.
     """
     for probe in (s.LivenessResponse, s.ReadinessResponse):
         assert _serialized_keys(probe) & {"data", "meta", "error"} == set()
@@ -1384,10 +1543,12 @@ def test_probes_are_never_enveloped() -> None:
 
 
 def test_envelope_generics_survive_into_openapi() -> None:
-    """`response_model=Envelope[LeaderboardRow]` 必须生成**具体**的 OpenAPI schema。
+    """`response_model=Envelope[LeaderboardRow]` must generate a **concrete**
+    OpenAPI schema.
 
-    泛型退化成 `data: object` 的话，前端和 worker 生成出来的类型里 `data` 是 `any`
-    —— 那就等于把这个包存在的理由（字段契约在类型里）扔了。
+    If the generic degrades into `data: object`, then in the types generated for
+    the frontend and the worker `data` is `any` — which throws away the reason
+    this package exists (the field contract living in the types).
     """
     single = s.Envelope[s.LeaderboardRow].model_json_schema(mode="serialization")
     assert single["title"] == "Envelope[LeaderboardRow]"
@@ -1400,6 +1561,8 @@ def test_envelope_generics_survive_into_openapi() -> None:
 
 
 def test_envelopes_are_frozen_like_every_other_response() -> None:
-    """信封也是响应模型，建好之后不许改 —— 出口处手改字段是这个仓库的历史问题。"""
+    """An envelope is a response model too and must not be modified once built —
+    patching fields by hand at the exit point is the historical problem of this
+    repository."""
     with pytest.raises(ValidationError):
-        _meta().request_id = "另一个"
+        _meta().request_id = "another"
