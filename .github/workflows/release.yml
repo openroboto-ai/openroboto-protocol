@@ -1,0 +1,216 @@
+name: Release
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 这个包发不出去的代价（写在这里，因为改这个文件的人需要知道自己在拆什么）
+#
+# openroboto-protocol 是红线区的唯一真源：种子派生、模型指纹、状态词表、响应信封。
+# 它装不上，消费方就只能抄。今天 openroboto-backend 里就留着 3 处手抄副本 ——
+# app/domain/worker_reports.py · app/domain/reasons.py · app/api/envelope.py 的复制段 ——
+# 全靠防漂测试守着，而 backend CI 里那条 "Protocol version is pinned" 至今空转，
+# 因为依赖表里根本还没有这个包。
+#
+# "手抄副本会漂"不是假设：protocol/types.py 漂过 105 行，payment.py 漂过 313 行，
+# 结果是矿工按 A 编码、后端按 B 解码，**两边都不报错**，直到有人去查为什么
+# 某次评测复现不出来。发布这一环就是为了把那条路径永久关掉。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# **正式发布**只在 v* tag 上：发布的输入必须是一个不可变的 git 引用，
+# 而且它就是消费方 `==` 钉住的那个数。
+#
+# `workflow_dispatch` 只走 TestPyPI 那条分支（见 `publish-testpypi` 的注释），
+# 手动触发**永远发不到正式 PyPI** —— 下面 `publish` job 的 `if` 钉死了这一点。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '发到 TestPyPI（不是正式 PyPI）。输入 testpypi 确认'
+        required: true
+        default: ''
+        type: string
+
+# 默认收到最小；publish job 自己按需加 id-token。
+permissions:
+  contents: read
+
+# cancel-in-progress: false —— 和 ci.yml 相反，是故意的。上传到 PyPI 的动作
+# 不可撤销也不可重放（同一个版本号只能上传一次），跑到一半被后来的 workflow
+# 掐掉，留下的是一个"发了一半"的版本，比慢一点糟糕得多。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # 与 ci.yml 保持同一个版本。升之前先确认 astral-sh/setup-uv 知道它的 checksum：
+  # https://github.com/astral-sh/setup-uv/issues/851#issuecomment-4282017837
+  UV_VERSION: "0.11.18"
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # 发布前跑的门槛就是 PR 上跑的那一套，一行不差 —— 直接 uses ci.yml，
+  # 而不是在这里重写几步"发版检查"。重写出来的那套必然更弱（谁会在发版
+  # workflow 里把 3.11/3.12 矩阵和 100% 覆盖率再敲一遍），而且没人会记得
+  # 同时维护两份。
+  #
+  # 它带来的具体保证（都在 ci.yml 里，红了就发不出去）：
+  #   · golden vectors —— 链上历史没被改写
+  #   · lint + mypy strict + pytest + coverage 100%（3.11 与 3.12 各一遍）
+  #   · tag 与 pyproject version 一致（build job 里的 "Tag matches package version"）
+  #   · twine check、wheel 里没有无条件依赖、装上后每个模块都 import 得动、
+  #     py.typed 在包里
+  # ───────────────────────────────────────────────────────────────────────────
+  gates:
+    name: gates (the same ones every PR runs)
+    uses: ./.github/workflows/ci.yml
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PyPI Trusted Publishing（OIDC），不用 API token。
+  #
+  # 理由和 backend 用 Workload Identity Federation 是同一个：长期 token 放在
+  # repo secrets 里，谁看过、什么时候泄的、泄了之后被用来发过什么，事后都查不出来；
+  # 而这个 token 的权限是"以 OpenRoboto 的名义往 PyPI 发任意版本" —— 拿到它的人
+  # 可以给全体矿工推一个改过种子派生的 1.0.1。OIDC 换来的 token 只对这一次
+  # workflow run 有效，且 PyPI 侧还要求它来自指定的 repo + workflow 文件 +
+  # environment，仓库里没有任何可偷的东西。
+  #
+  # 关于 TestPyPI（2026-08-19 更新了这一段的结论）：
+  #
+  # 原来这里写的是"不发"，理由是 TestPyPI 只能多抓到"索引侧拒收"，而 metadata
+  # 由 `twine check --strict` 判过、包装完整性由"装 wheel 逐模块 import + 查
+  # py.typed"判过。那半段仍然成立 —— **包本身**确实不需要 TestPyPI 再验一遍。
+  #
+  # 但它漏了一件 gates 验不到的东西：**发布通道本身**。OIDC 交换成不成、
+  # environment 名和 pypi.org 上那条记录对不对得上、`id-token: write` 够不够 ——
+  # 这些在真正 `uv publish` 之前一次都没跑过。所以补了一条 `workflow_dispatch`
+  # 的 TestPyPI 分支，它跑的是**同一个 gates、同一份产物**，只换上传目标。
+  #
+  # 原来那条"两份配置迟早只有一份是对的"的担心是真的，所以两个 job 共用
+  # `needs: [gates]` 和同一个 artifact，唯一的差别就是 environment 名和
+  # `--publish-url` 两行 —— 不存在"两套流程漂移"的空间。
+  #
+  # ⚠️ TestPyPI 上的版本号**同样不可重用**。它不是可以随便乱发的沙盒，
+  # 只是发错了不影响真实消费方。
+  #
+  # 真正的安全网仍然是下面的 environment 人工审批 —— 版本号烧不起。
+  # ───────────────────────────────────────────────────────────────────────────
+  publish:
+    name: publish to PyPI
+    needs: [gates]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 🔴 手动触发**永远**到不了正式 PyPI。没有这一行的话，
+    # `workflow_dispatch` 会同时点着两个 publish job，而那一个是不可撤销的。
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    # environment 有两个作用，缺一不可：
+    #   1. GitHub 上可以给它配 required reviewers —— 上传不可撤销、版本号不可重用，
+    #      在按下去之前必须有一个人类确认这确实是要发的那个 tag；
+    #   2. PyPI 的 trusted publisher 配置里填的就是这个名字，环境名对不上，
+    #      OIDC 交换直接被拒。改名字要同时改 pypi.org 上那条记录。
+    environment:
+      name: pypi
+      url: https://pypi.org/p/openroboto-protocol
+
+    permissions:
+      # OIDC 必需：没有它 uv 拿不到 id token，trusted publishing 无从谈起。
+      id-token: write
+      contents: read
+
+    steps:
+      # 不 checkout：发布用的是 gates 里构建并验证过的产物，不是重新构建的
+      # 另一份。少一次 checkout 也意味着这个拿着 id-token 的 job 里没有仓库代码
+      # 可执行 —— 唯一跑起来的东西是 uv publish。
+      - name: Download the artifact that passed the gates
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      # ci.yml 已经比过一次 tag 与 pyproject 的 version。这里再比一次，比的是
+      # **产物文件名**，也就是真正要上传的那堆字节。上一次证明的是"源码里写着
+      # 1.0.0"，这一次证明的是"要传上去的包确实叫 1.0.0"。中间隔着一次
+      # artifact 上传下载，而消费方钉的是版本号：`openroboto-protocol==1.0.0`
+      # 装到别的东西，这个包唯一的存在理由当场作废。
+      - name: Artifact version matches the tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for expected in \
+            "dist/openroboto_protocol-${version}.tar.gz" \
+            "dist/openroboto_protocol-${version}-py3-none-any.whl"; do
+            if [ ! -f "$expected" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} but no ${expected}; dist holds:"
+              ls -1 dist
+              exit 1
+            fi
+          done
+          echo "dist matches tag ${GITHUB_REF_NAME}"
+
+      # --trusted-publishing always：不是 automatic。automatic 在拿不到 OIDC
+      # token 时会**静默退回**去找 token/密码，于是权限配错的那次不会红，而是
+      # 变成一条看不懂的 401；always 直接失败在这一步，错误就在原地。
+      - name: Publish
+        run: uv publish --trusted-publishing always dist/*
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # TestPyPI —— 只手动触发，用来排练发布通道（不是排练包本身，那是 gates 的事）。
+  #
+  # 它和上面那个 job 的差别只有两行：environment 名、`--publish-url`。
+  # 其余全部共用：同一个 `needs: [gates]`、同一份 artifact、同样的
+  # `--trusted-publishing always`。**故意不给它自己的 gates** —— 两套门槛
+  # 迟早只有一套是对的。
+  #
+  # test.pypi.org 上要单独配一条 pending publisher，四个字段：
+  #   Owner=openroboto-ai  Repository=openroboto-protocol
+  #   Workflow=release.yml  Environment=testpypi
+  # 前两个和正式那条一样，后两个里 environment **必须**不同，否则两条记录
+  # 在 PyPI 侧无法区分。
+  # ───────────────────────────────────────────────────────────────────────────
+  publish-testpypi:
+    name: publish to TestPyPI (rehearsal)
+    needs: [gates]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 只认手动触发，且要在输入框里打字确认 —— 防的是"点开 Run workflow 顺手回车"。
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && github.event.inputs.confirm == 'testpypi'
+
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/openroboto-protocol
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download the artifact that passed the gates
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: dist
+          path: dist
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      # 手动触发时没有 tag 可比，所以这里比的是**产物的形状**：恰好一个 sdist
+      # 加一个 wheel。多出第三个文件（比如上一次构建的残留）意味着要传上去的
+      # 不只是这次 gates 验过的那些字节。
+      - name: Exactly one sdist and one wheel
+        run: |
+          ls -1 dist
+          test "$(ls -1 dist/*.tar.gz | wc -l)" -eq 1
+          test "$(ls -1 dist/*.whl | wc -l)" -eq 1
+
+      - name: Publish to TestPyPI
+        run: |
+          uv publish --trusted-publishing always \
+            --publish-url https://test.pypi.org/legacy/ dist/*
