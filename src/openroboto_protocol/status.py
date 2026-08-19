@@ -211,9 +211,24 @@ class Stage:
 STAGE_DOWNLOADING: Final[str] = "downloading"
 STAGE_PRECHECKING: Final[str] = "prechecking"
 STAGE_RUNNING: Final[str] = "running"
+STAGE_CLAIMED: Final[str] = "claimed"
 
-#: 三个阶段的完整词表。顺序即 worker 的实际执行顺序。
+#: 阶段词表。顺序即 worker 的实际执行顺序。
 STAGES: Final[tuple[Stage, ...]] = (
+    # `claimed` = worker 领了任务但还没开始下载，所以排在最前。
+    #
+    # 2026-08-19 补进来。此前这个包只有三个阶段，而**生产接受第四个**：
+    # `prototype-prod/backend/api/handlers/benchmark.py::handle_status_update`
+    # 的白名单是 `{benchmark_downloading, benchmark_prechecking,
+    # benchmark_running, benchmark_claimed}`，不在里面的一律 `INVALID_STATUS`。
+    #
+    # ⚠️ 证据有两份且方向相反，最后按「代码接受什么」定：
+    # 08-18 的生产副本里 `claimed` 在 `stage` / `status` / `eval_status` /
+    # `submission_history.eval_status` **四个列里都是 0 次** —— 它从没被存过。
+    # 但少这一条的后果不是「多一个没用的词」，是 worker 上报 `claimed` 时
+    # 我们判非法、生产收下 —— 两边对同一个输入给出不同答案，
+    # 正是这个包存在要消灭的东西。
+    Stage(wire=STAGE_CLAIMED, stored="benchmark_claimed"),
     Stage(wire=STAGE_DOWNLOADING, stored="benchmark_downloading"),
     # `precheck` 是前端类型里的写法（web/src/api/types.ts 的 QueueProgressStage）。
     Stage(

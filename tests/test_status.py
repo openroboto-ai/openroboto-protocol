@@ -172,10 +172,25 @@ def test_scan_phase_chain() -> None:
 
 
 def test_wire_stage_vocabulary_matches_production() -> None:
-    """线上 stage 出现过 running 61 / "" 47 / downloading 8 / prechecking 1。
+    """词表 = 生产**接受**的四个，不是生产**存过**的三个。
+
+    2026-08-19 补了 `claimed`。两份证据方向相反，最后按「代码接受什么」定：
+
+    - 存过什么：08-18 的生产副本里 `stage` 只有
+      running 38 / benchmark_running 24 / "" 47 / downloading 8 /
+      benchmark_prechecking 2，`claimed` 在 `stage`、`status`、`eval_status`、
+      `submission_history.eval_status` **四个列里都是 0 次**。
+    - 接受什么：生产 `backend/api/handlers/benchmark.py::handle_status_update`
+      的白名单是 `{benchmark_downloading, benchmark_prechecking,
+      benchmark_running, benchmark_claimed}`，**不在里面的一律 `INVALID_STATUS`**。
+
+    按后者。少这一条的后果不是「多一个没用的词」，是 worker 上报 `claimed` 时
+    被我们判成未知词 —— 而生产会收下它。两边对同一个输入给出不同答案，
+    正是这个包存在要消灭的东西。
+
     **从没出现过 evaluating** —— 对外规范词是 running，这是四方词表之争的裁决依据。
     """
-    assert S.ALL_STAGES == {"downloading", "prechecking", "running"}
+    assert S.ALL_STAGES == {"downloading", "prechecking", "running", "claimed"}
     assert "evaluating" not in S.ALL_STAGES
 
 
@@ -201,10 +216,16 @@ def test_normalize_stage_strips_and_lowercases() -> None:
 
 
 def test_normalize_stage_rejects_unknown() -> None:
-    """`scoring` 只存在于前端词表，没有任何后端路径产出它；空串是"没有阶段"。"""
+    """`scoring` 只存在于前端词表，没有任何后端路径产出它；空串是"没有阶段"。
+
+    ⚠️ `claimed` 曾经在这条里（断言它被拒）。2026-08-19 移出去了：生产的
+    `handle_status_update` 白名单收 `benchmark_claimed`，我们判它非法就等于
+    对同一个输入给出和生产相反的答案。它现在的断言在
+    `test_wire_stage_vocabulary_matches_production`。
+    """
     assert S.normalize_stage("scoring") is None
-    assert S.normalize_stage("claimed") is None
     assert S.normalize_stage("") is None
+    assert S.normalize_stage("claimed") == S.STAGE_CLAIMED
 
 
 def test_stage_records_are_frozen() -> None:
@@ -217,6 +238,7 @@ def test_stage_records_are_frozen() -> None:
 def test_stage_stored_form_is_the_prefixed_one() -> None:
     """库里存 benchmark_ 前缀，出口必须翻译；不翻译前端渲染不出进度条。"""
     assert [s.stored for s in S.STAGES] == [
+        "benchmark_claimed",
         "benchmark_downloading",
         "benchmark_prechecking",
         "benchmark_running",
@@ -224,7 +246,13 @@ def test_stage_stored_form_is_the_prefixed_one() -> None:
 
 
 def test_stage_order_is_the_worker_execution_order() -> None:
-    assert [s.wire for s in S.STAGES] == ["downloading", "prechecking", "running"]
+    # `claimed`（领了任务、还没开始下载）排在最前 —— 顺序即 worker 的实际执行顺序。
+    assert [s.wire for s in S.STAGES] == [
+        "claimed",
+        "downloading",
+        "prechecking",
+        "running",
+    ]
 
 
 # ── 历史遗留状态词 ────────────────────────────────────────────────────────

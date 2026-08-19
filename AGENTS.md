@@ -116,7 +116,7 @@ from openroboto_protocol import derive_seed  # ❌ 顶层没有这个名字
 实测：`import openroboto_protocol` 0.24 ms，`openroboto_protocol.schemas` 74 ms。
 两仓今天 24 条真实 import 全是子模块形状，**从顶层拿符号的 0 条** —— 迁移成本为零。
 
-消费方钉死精确版本（`openroboto-protocol==0.2.0`）。浮动版本和本地 vendored 副本
+消费方钉死精确版本（`openroboto-protocol==0.3.0`）。浮动版本和本地 vendored 副本
 都由消费方 CI 拒绝（两条检查的原文在 README「What consumers must add to their own CI」，
 已经跑在 `openroboto-backend` 和 `openroboto-cli` 上）。
 

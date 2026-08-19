@@ -684,7 +684,7 @@ def check_required_envs(env_scores: object) -> None:
 
 #: 对外的规范阶段词。**与 `status.ALL_STAGES` 同源**，
 #: `tests/test_schemas.py` 钉住两者相等 —— 这个模块不许有第二套阶段词表。
-EvalStage = Literal["downloading", "prechecking", "running"]
+EvalStage = Literal["claimed", "downloading", "prechecking", "running"]
 
 #: worker 上报的进度明细里可能出现的键。前端 `QueueProgressDetail`
 #: （`web/src/api/types.ts`）就是按这些画进度条的。
