@@ -68,7 +68,7 @@ dependencies = []   # 保持这样
 >   backend 的 CI 今天是绿的，而那份绿什么都没证明。
 >   1.0 冻结的必须是一份**真被 import 过**的形状。
 >
-> - [ ] **`normalize_weights` 收进本包，两边的副本删掉。**
+> - [~] **`normalize_weights` 收进本包**（✅ 0.4.0 `weights.py`）**，两边的副本删掉**（⏳ 等 0.4.0 发布）。
 >   今天两份：`openroboto-backend/app/services/chain_writer.py:82` 和
 >   `openroboto-cli/src/openroboto/chain/weights.py:31`。
 >   这是链上排放的**最后一道换算**，而它根本不在这个包的表面上 ——
@@ -85,6 +85,13 @@ dependencies = []   # 保持这样
 >   `1/3 → int(21844.999…) = 21844` 是错的（`(1/3)*65535` 精确等于 `21845.0`，
 >   三份相加正好 65535）。真正的证据是链上快照 122 自己：`0.9*65535 == 58981.5`，
 >   `int` 给 58981、`round` 给 58982 —— 改成 `round()` 会直接改掉一个历史值。
+>
+>   ✅ **2026-08-20：模块已落地**（`weights.py`，0.4.0），错例没搬进来、正确的
+>   那个（快照 122）进了 docstring 和用例。**副本要等 0.4.0 发布才能删** ——
+>   两个消费仓各留了一条**会自己到期**的用例（`test_protocol_weight_parity.py`）：
+>   协议包一带上 `weights` 就变红，并在报错里写清要做哪三件事。
+>   写成用例而不是注释，是因为上一条同样形状的待办
+>   （cli 的 `burn_block_window`「等 0.3.0 发布」）**0.3.0 第二天就发了而没人回头看**。
 >
 > - [ ] **每个模块声明 `__all__`，并有一条测试钉住这张表。**
 >   今天只有 `schemas.py` 有（72 项），`constants` / `status` / `seed` /

@@ -10,7 +10,7 @@ name = "openroboto-protocol"
 # （0.1.0 → 0.2.0）这样收紧 schemas 的哨兵默认值是允许的。
 #
 # ⚠️ 0.1.0 已经发到 PyPI（2026-08-19，OIDC）。PyPI 版本号不可重用，只能往前发。
-version = "0.3.0"
+version = "0.4.0"
 description = "Shared protocol contract for the OpenRoboto subnet on Bittensor (netuid 80): seed derivation, commitment codec, model hashing, status vocabulary and API schemas."
 readme = "README.md"
 license = "MIT"
