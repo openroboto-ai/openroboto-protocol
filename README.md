@@ -9,9 +9,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.5.0"
+uv add "openroboto-protocol==0.6.0"
 # or
-pip install "openroboto-protocol==0.5.0"
+pip install "openroboto-protocol==0.6.0"
 ```
 
 ```python
@@ -29,7 +29,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.5.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.6.0"   # backend only
 ```
 
 ## Why this package exists
@@ -99,7 +99,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.5.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.6.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 ## What consumers must add to their own CI
