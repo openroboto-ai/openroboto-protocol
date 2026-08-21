@@ -8,6 +8,8 @@ assertions that make one copy enough.
 
 from __future__ import annotations
 
+import pytest
+
 from openroboto_protocol import weights
 from openroboto_protocol.weights import U16_MAX, normalize_weights
 
@@ -147,3 +149,43 @@ def test_public_surface_is_pinned() -> None:
     has to choose the version bump.
     """
     assert weights.__all__ == ["U16_MAX", "NormalizedWeights", "normalize_weights"]
+
+
+def test_dropped_share_reports_what_went_missing() -> None:
+    """The share that belonged to absent hotkeys, as a fraction of the input.
+
+    Callers refuse to send on a large value. The number has to be right for
+    that decision to mean anything, so it is asserted exactly rather than
+    "greater than zero".
+    """
+    result = normalize_weights(
+        {"burn": 0.9, "a": 0.07, "b": 0.02, "c": 0.01}, ["a", "b", "c"]
+    )
+
+    assert result.dropped_share == pytest.approx(0.9)
+    # What remains is still renormalised over itself -- reporting the loss does
+    # not change the arithmetic.
+    assert sum(result.weights) == pytest.approx(U16_MAX, abs=4)
+
+
+def test_dropped_share_is_zero_when_everyone_is_present() -> None:
+    result = normalize_weights({"a": 0.7, "b": 0.3}, ["a", "b"])
+
+    assert result.dropped_share == 0.0
+
+
+def test_dropped_share_is_one_when_nobody_is_present() -> None:
+    """Every hotkey gone: no uids to send, and the caller should hear why.
+
+    Distinguishing this from an empty snapshot matters -- one means the chain
+    moved on without us, the other means nothing was scored.
+    """
+    result = normalize_weights({"a": 0.7, "b": 0.3}, ["someone-else"])
+
+    assert result.uids == []
+    assert result.dropped_share == 1.0
+
+
+def test_dropped_share_of_an_empty_snapshot_is_zero_not_a_crash() -> None:
+    """No input to lose. Zero, not a division by zero."""
+    assert normalize_weights({}, ["a"]).dropped_share == 0.0

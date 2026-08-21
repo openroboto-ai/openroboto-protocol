@@ -48,6 +48,25 @@ class NormalizedWeights:
     #: Per-entry lines, written straight to the log. When weights turn out
     #: wrong, this is the only evidence of what went in and what came out.
     detail: list[str]
+    #: Fraction of the incoming share that belonged to hotkeys absent from the
+    #: metagraph, and was therefore redistributed over those that remain.
+    #:
+    #: 🔴 **Callers are expected to refuse to send when this is large.** The
+    #: number is reported rather than enforced here because the two callers
+    #: cannot enforce the same thing: the backend knows which address is the
+    #: burn target and can name it, an external validator does not. What both
+    #: can do is notice that most of the weight just moved.
+    #:
+    #: Why it matters: the burn address holds 0.9 of a normal snapshot. If it
+    #: drops out, the remaining 0.1 is renormalised to 1.0 and every bit of
+    #: emission that should have been destroyed goes to miners instead — a
+    #: tenfold payout, from one address going missing, with nothing in the
+    #: result to say so. A deregistered miner holds at most 0.07, so the two
+    #: cases are far apart and a threshold around 0.5 separates them cleanly.
+    #:
+    #: Observed 2026-08-21 on testnet 313: a snapshot still carrying mainnet's
+    #: burn address produced `uid=23 u16=65535`, one miner taking everything.
+    dropped_share: float = 0.0
 
 
 def normalize_weights(
@@ -99,8 +118,12 @@ def normalize_weights(
             positive[uid] = weight
             detail.append(f"  uid={uid:3d} hotkey={hotkey[:12]}... raw={weight:.6f}")
 
+    incoming = sum(w for w in weights_raw.values() if w > 0)
+    kept = sum(positive.values())
+    dropped_share = (incoming - kept) / incoming if incoming > 0 else 0.0
+
     if not positive:
-        return NormalizedWeights([], [], ["no positive weights"])
+        return NormalizedWeights([], [], ["no positive weights"], dropped_share)
 
     total = sum(positive.values())
     normed = {uid: weight / total for uid, weight in positive.items()}
@@ -113,4 +136,4 @@ def normalize_weights(
         f"  → uid={uid:3d} u16={w:5d} ({normed[uid]:.6f})"
         for uid, w in zip(uids, weights, strict=True)
     )
-    return NormalizedWeights(uids, weights, detail)
+    return NormalizedWeights(uids, weights, detail, dropped_share)
