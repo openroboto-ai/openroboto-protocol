@@ -1566,3 +1566,77 @@ def test_envelopes_are_frozen_like_every_other_response() -> None:
     repository."""
     with pytest.raises(ValidationError):
         _meta().request_id = "another"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 后端阶段 1 把哨兵值换成了 null —— 契约必须跟得上
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 一行真实响应的字段形状，取自 `api-dev.openroboto.ai` 2026-08-21 实测。
+#: hotkey / 仓库名 / task_id 已替换，其余保持原样 —— **尤其是那些 `None`**。
+_REAL_HISTORY_ROW = {
+    "id": 1,
+    "task_id": "<redacted>",
+    "uid": 23,
+    "hotkey": "<redacted>",
+    "round_num": 1,
+    "hf_repo_id": "<redacted>",
+    "hf_commit": "ba782170658f3ea41d1950af49aa200877ec630f",
+    "commit_block": 7830000,
+    "commit_block_timestamp": 1787300000,
+    "burn_tx_hash": (
+        "0xa3586af1a559d2f9d3a31c27691f6ee77d88335bd7b51060e8cbf229c1183605"
+    ),
+    "burn_block": 7829990,
+    "burn_status": "confirmed",
+    "block_hash": (
+        "0x71ef6fa31929e790a06b183c0163c03eb42069c8a72ad211b03baa5c1f134c03"
+    ),
+    "eval_status": "pending",
+    "env_list": ["libero_spatial"],
+    "model_hash": ("02e50f7d7d26d3298a500f2b9ccc3e0c8d1a9e6cceadf9ae545c4fcc1cee466a"),
+    # 🔴 后端真的会发这些 null。此前契约把它们声明成 `str = ""`。
+    "result": None,
+    "detail": None,
+    "reject_reason": None,
+    "avg_score": None,
+    "stage": None,
+    "reason": None,
+}
+
+
+def test_a_real_response_row_parses() -> None:
+    """🔴 **这条是拿真实响应喂出来的，不是手写的。**
+
+    2026-08-21，CLI 的第一次真实端到端跑在最后一步炸了：
+
+        2 validation errors for ListEnvelope[SubmissionHistoryItem]
+        data.0.model_hash  Input should be a valid string, input_value=None
+        data.0.stage       Input should be a valid string, input_value=None
+
+    那时 burn 已经付过、模型已经传上 HF —— **代价是真金白银的那一步之后才发现
+    契约对不上**。根因是后端阶段 1 把「没有值」的列全部换成了 SQL NULL，
+    而契约这边三个字段还停在 `str = ""`。
+
+    手写的用例挡不住这类：写的人按契约构造输入，于是永远自洽。所以这一行
+    直接取自实测响应，**尤其保留了那些 `None`**。
+    """
+    item = s.SubmissionHistoryItem.model_validate(_REAL_HISTORY_ROW)
+
+    assert item.model_hash is not None
+    assert item.stage is None
+    assert item.reject_reason is None
+
+
+def test_the_fields_phase_one_made_nullable_are_nullable() -> None:
+    """逐个钉住，别再漏。
+
+    `model_hash` / `stage` / `reject_reason` 三个是同一次改造的产物；
+    漏掉任何一个的表现都一样：矿工烧完钱，最后一步解析失败。
+    """
+    for field in ("model_hash", "stage", "reject_reason"):
+        annotation = s.SubmissionHistoryItem.model_fields[field].annotation
+        assert "None" in str(annotation), (
+            f"{field} 声明成 {annotation} —— 后端会发 null，"
+            f"而这条路径上矿工已经付过 burn"
+        )

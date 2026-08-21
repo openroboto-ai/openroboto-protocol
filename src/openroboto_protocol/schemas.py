@@ -1310,7 +1310,10 @@ class SubmissionHistoryItem(Contract):
     detail: dict[str, Any] | None = None
     #: Kept as-is — reading it is what the miner docs teach. `reason` is an addition,
     #: not a replacement.
-    reject_reason: str = ""
+    #: ⚠️ `None`, not `""` — same phase-1 sentinel change as `model_hash` / `stage`.
+    #: This one had not bitten yet only because the row that broke the E2E run
+    #: happened to be a rejection with a reason; a clean submission returns `null`.
+    reject_reason: str | None = None
     #: The three pieces of the seed dispatch. ⚠️ **Never having dispatched a seed is
     #: `null`, not 0 and not an empty string**, and the three fields must be present
     #: together or absent together — otherwise we emit a response like
@@ -1354,11 +1357,20 @@ class SubmissionHistoryItem(Contract):
     #: ⚠️ The plagiarism fingerprint. Whether it should stay public awaits a product
     #: judgement (spec 06 §7 Q5); before that ruling keep the live status quo (return
     #: it), and **do not delete it on a whim, nor add `repo_hash` on a whim**.
-    model_hash: str = ""
+    #: ⚠️ `None`, not `""`. The rebuilt backend's phase-1 sentinel work turned every
+    #: "there is no value" column into SQL NULL, and this field came through it — a
+    #: submission whose fingerprint has not been computed yet returns `null`.
+    #: Measured 2026-08-21 against the dev backend: the CLI's first real end-to-end
+    #: run died here with `Input should be a valid string, input_value=None`, at the
+    #: last step, after the burn had already been paid.
+    model_hash: str | None = None
     #: Measured live: always `null` while `result.total_score` has a value — two score
     #: fields, one true and one false.
     avg_score: float | None = None
-    stage: str = ""
+    #: Same as `model_hash`: `null` when no worker has reported progress yet.
+    #: Note `1227` above already declares `stage: str | None` on the sibling model —
+    #: the two disagreed, which is how this one survived.
+    stage: str | None = None
     submitted_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
