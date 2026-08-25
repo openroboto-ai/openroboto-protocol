@@ -35,6 +35,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from openroboto_protocol import schemas as s
+from openroboto_protocol.commitment import Track
 from openroboto_protocol.constants import REQUIRED_ENVS
 from openroboto_protocol.status import ALL_STAGES, ALL_STATUSES, STATUS_PENDING
 
@@ -281,6 +282,23 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.CurrentRoundResponse: {"round"},
     s.RoundsSummary: {"rounds_settled", "cumulative_improvement"},
     s.RoundHistoryResponse: {"summary", "rounds", "total"},
+    # —— one season and the spec frozen for it (ADR 03) ——
+    s.Competition: {
+        "id",
+        "track",
+        "seq",
+        "label",
+        "adapter",
+        "status",
+        "submit_opens_at",
+        "submit_closes_at",
+        "eval_starts_at",
+        "eval_ends_at",
+        "champion_announced_at",
+        "base_repo",
+        "base_revision",
+        "params",
+    },
     # —— real track: one episode per request ——
     s.MediaRef: {"uri", "sha256", "bytes_len"},
     s.EpisodeResult: {
@@ -405,6 +423,12 @@ def test_display_vocabularies_never_overlap_lifecycle_words() -> None:
     assert s.LEADERBOARD_STATUSES & ALL_STATUSES == frozenset()
     assert s.ROUND_STATUSES & ALL_STATUSES == frozenset()
     assert s.LEADERBOARD_STATUSES & s.ROUND_STATUSES == frozenset()
+    # A season's lifecycle is a fourth vocabulary, on a different object. It has to
+    # stay disjoint from the other three for the same reason: one `status` key whose
+    # word set depends on which endpoint answered is unreadable at the consumer.
+    assert s.COMPETITION_STATUSES & ALL_STATUSES == frozenset()
+    assert s.COMPETITION_STATUSES & s.LEADERBOARD_STATUSES == frozenset()
+    assert s.COMPETITION_STATUSES & s.ROUND_STATUSES == frozenset()
 
 
 def test_leaderboard_status_rejects_lifecycle_words() -> None:
@@ -1195,6 +1219,100 @@ def test_revision_is_null_when_the_commit_is_unknown() -> None:
         ).revision
         is None
     )
+
+
+# --- competitions (ADR 03) ---
+
+
+def _competition(**overrides: Any) -> s.Competition:
+    """The real `(sim, 2)` seed row: no instants, no base repo, fee in `params`."""
+    payload: dict[str, Any] = {
+        "id": 2,
+        "track": "sim",
+        "seq": 2,
+        "label": "LingBot-VLA 2.0",
+        "adapter": "sim_lingbot",
+        "status": "active",
+        "params": {"fee": {"amount_tao": 0.1, "kind": "burn", "coldkey": None}},
+    }
+    payload.update(overrides)
+    return s.Competition.model_validate(payload)
+
+
+def test_competition_instants_default_to_unbounded_not_to_a_faked_date() -> None:
+    """All five instants are absent on the simulation seasons, and `None` there
+    means **this boundary is not checked** — not "unknown".
+
+    A consumer that reads `None` as missing data and fills in a plausible date
+    (now, the round's start, `datetime.max`) invents a submission window nobody
+    configured: too early closes submissions on miners who paid, too late accepts
+    entries into a season that is already being evaluated.
+    """
+    c = _competition()
+    assert c.submit_opens_at is None
+    assert c.submit_closes_at is None
+    assert c.eval_starts_at is None
+    assert c.eval_ends_at is None
+    assert c.champion_announced_at is None
+
+
+def test_competition_base_model_is_null_or_real_never_the_empty_string() -> None:
+    """`base_repo` / `base_revision` are `None` until somebody pins them.
+
+    π0.5's commit was never pinned and the LingBot repository is not decided yet.
+    `""` is not the same fact: it builds a HuggingFace URL that resolves — to the
+    default branch, i.e. to whatever the weights are today — so a consumer cannot
+    tell "not pinned" from "pinned to nothing" and the audit trail points at code
+    that was never evaluated.
+    """
+    c = _competition()
+    assert c.base_repo is None and c.base_revision is None
+    with pytest.raises(ValidationError):
+        _competition(base_repo="")
+    with pytest.raises(ValidationError):
+        _competition(base_revision="")
+    assert _competition(base_repo="openroboto-ai/pi05-libero-pytorch").base_repo
+
+
+def test_competition_params_are_passed_through_including_a_null_coldkey() -> None:
+    """`params` is handed over verbatim, `null`s included.
+
+    The real track's `fee.coldkey` **is** `null` today (the wallet does not
+    exist), and the model must keep saying so. Substituting any address here —
+    or dropping the key so a consumer's `.get()` default takes over — sends the
+    2 TAO entry fee to somewhere nobody holds the key to, before the submission
+    is even made. The consumer's only correct reaction to `null` is to refuse.
+    """
+    real = _competition(
+        id=3,
+        track="real",
+        seq=1,
+        adapter="real_xarm6",
+        params={
+            "fee": {"amount_tao": 2, "kind": "transfer", "coldkey": None},
+            "qualification": {"threshold": 9, "measured_at": None},
+        },
+    )
+    assert real.params["fee"]["coldkey"] is None
+    assert real.params["qualification"]["threshold"] == 9
+    assert real.model_dump(mode="json")["params"]["fee"]["coldkey"] is None
+
+
+def test_competition_track_is_the_commitment_vocabulary() -> None:
+    """`track` is the very `Track` the on-chain codec takes, not a second copy.
+
+    The value the CLI reads off this response is passed straight into
+    `check_payload(payload, track)`; a private spelling here would have to be
+    translated, and a translation table between two vocabularies of the same
+    thing is ZCY-158 exactly. An unknown word is rejected instead of defaulting
+    to `sim`, which would file a real-track entry on the simulation leaderboard
+    with the fee already paid.
+    """
+    assert _competition().track is Track.SIM
+    assert _competition(track="real").track is Track.REAL
+    assert _competition().model_dump(mode="json")["track"] == "sim"
+    with pytest.raises(ValidationError):
+        _competition(track="banana")
 
 
 def test_queue_task_round_num_cannot_be_omitted() -> None:

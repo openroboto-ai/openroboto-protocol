@@ -66,6 +66,25 @@ Added, all optional, all with a defined meaning for data that predates them:
   table keyed by `competition_id` and share the same eight lifecycle words —
   `registered` maps to `received`, `disqualified` to `rejected` plus a reason
   code. Two vocabularies on one column is the 2026-08-14 incident itself.
+- **`schemas`**: `Competition` — the body of `GET /api/v1/competitions`, one season
+  and the spec frozen for it (backend `competitions`, ADR 03). It reuses
+  `commitment.Track` instead of spelling `sim` / `real` a second time, and lists
+  through the existing `ListEnvelope`, so no wrapper model was added.
+  Three field decisions worth knowing before you consume it, each written out in the
+  docstring: the five instants are all optional and `None` means **this boundary is
+  not checked** (not "unknown" — filling in a plausible date invents a submission
+  window nobody configured); `base_repo` / `base_revision` are `None` until pinned and
+  **cannot be `""`** (π0.5's commit was never pinned, and `""` builds a HuggingFace URL
+  that quietly resolves to today's weights); and `params` stays `dict[str, Any]` on
+  purpose — parsing it into a fixed model turns `jsonb` back into columns. 🔴
+  `params["fee"]["coldkey"]` **is `null` today** on the real track; a consumer that
+  reads it must fail closed and refuse to pay, because any substitute address spends
+  the entry fee before the submission exists. `id` is served because it is what goes on
+  chain as `cid`, but `(track, seq)` is the stable key — that is what `miner.yaml`
+  stores and what a payload without `cid` resolves by. `status`
+  (`draft` / `active` / `archived`) is a closed `Literal`, disjoint from the other
+  three status vocabularies and test-pinned that way; `adapter` is deliberately an open
+  `str` so a new season does not need a release of this package.
 - **`schemas`**: `EpisodeResult`, `MediaRef`, `EpisodeFailure` — the body of
   `POST /real/tasks/{id}/episodes`, one episode per request, 24 per entry.
   `MediaRef` binds a `uri` to its `sha256` because both must come from the same

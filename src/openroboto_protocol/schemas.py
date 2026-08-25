@@ -107,6 +107,7 @@ from pydantic import (
     model_validator,
 )
 
+from .commitment import Track
 from .constants import REQUIRED_ENVS
 from .status import normalize_stage
 
@@ -1823,6 +1824,126 @@ class RoundHistoryResponse(Contract):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GET /api/v1/competitions — one season and the spec frozen for it
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: The **lifecycle** of a season row, the value set of `competitions.status`.
+#:
+#: ⚠️ A lifecycle is **not a phase**. This word says whether the season is running at
+#: all; whether a running season is *taking submissions* or *evaluating* is derived from
+#: the five instants below and is deliberately **not** a column — a stored phase and the
+#: instants drift apart, and then somebody has to maintain the flip (ADR 03 §3.3).
+#:
+#: A closed `Literal` rather than the open `str` used for submission lifecycle words
+#: (`STATUS_VALUED_FIELDS`): those are read back out of rows written before the
+#: vocabulary was settled, while this column has a `CHECK` constraint, so a fourth word
+#: cannot exist in the database without a migration that also changes this line.
+CompetitionStatus = Literal["draft", "active", "archived"]
+
+#: For the same "one response, one vocabulary" check the other status words get.
+COMPETITION_STATUSES: Final[frozenset[str]] = frozenset(get_args(CompetitionStatus))
+
+
+class Competition(Contract):
+    """One season and the spec frozen for it (the `competitions` row, ADR 03).
+
+    ## Which value is the key: `(track, seq)`, not `id`
+
+    `id` is here because it is what travels: it is the on-chain `cid`
+    (`commitment.CommitmentPayload.competition_id`) and the `competition_id` the backend
+    files a submission under. Read it, send it — but **do not persist it**. It is an
+    identity column, local to one database; a reseed or a restore into a fresh
+    environment hands out different numbers for the same seasons, and a config file
+    still holding the old one silently points at another competition.
+
+    Anything durable keys on **`(track, seq)`** — which is what
+    `ux_competitions_track_seq` makes unique, and what a payload with no `cid` is
+    resolved by (`(sim, round_num=r)`). Concretely, the CLI's `miner.yaml` stores
+    `track` + `seq`, resolves them against this endpoint at submit time, and puts the
+    `id` it got back into the commitment. Storing the `id` instead saves one lookup and
+    costs a season's entry fee the day it is wrong.
+
+    `seq` is also the display number (`Round 07` in the frontend); it counts from 1
+    **within a track**, so `(sim, 1)` and `(real, 1)` are two different competitions.
+
+    ## `params` stays open on purpose
+
+    It is `jsonb` on the database side because every season changes it. Parsing it into
+    a fixed model here would turn it back into columns, and every new season key would
+    then need a release of this package before the backend could serve it.
+
+    🔴 **`params["fee"]["coldkey"]` can be `null`, and `null` means "do not pay".**
+    The real track's collection address does not exist yet. A consumer that reads it
+    must **fail closed**: refuse to submit, tell the miner why. Falling back to any
+    other address — a burn address, the simulation track's behaviour, a default —
+    sends real TAO somewhere nobody holds the key to, and the fee is spent before the
+    submission is even made. Missing keys raise `KeyError` for the same reason: a
+    `.get(...)` with a default is the fail-open version of this paragraph.
+    """
+
+    #: Local to one database. See "Which value is the key" above.
+    id: int
+    #: The same `Track` the commitment codec takes, imported rather than re-spelled: a
+    #: second copy of `sim` / `real` is a second thing to keep in sync.
+    track: Track
+    #: 1-based, per track.
+    seq: int
+    #: For humans (`π0.5`, `xArm 6 第一届`). Never matched on.
+    label: str
+    #: Which evaluation implementation runs this season (`sim_openpi`, `sim_lingbot`,
+    #: `real_xarm6`). Left as an open `str`: the vocabulary grows with every new season,
+    #: and a `Literal` here would mean this package has to be released before the
+    #: backend can serve a competition it already knows how to run. The registry that
+    #: must be closed is the dispatch table in the backend, which fails closed at start.
+    adapter: str
+    status: CompetitionStatus
+
+    # ── The five instants ────────────────────────────────────────────────────
+    #
+    # 🔴 `None` means **this boundary is not checked**. It does not mean "unknown", "not
+    # decided yet" or "ask somebody" — there is nothing to fall back to and nothing to
+    # fill in. A season with `submit_closes_at = None` takes submissions indefinitely,
+    # and that is a configuration, not missing data.
+    #
+    # This is a property of the fields, **not of the track**. The simulation seasons
+    # have all five empty today because the champion-holds format sets no boundaries;
+    # that is this rule applied, not a simulation special case. Branching on the track
+    # name here would produce the wrong answer the day a simulation season gets dates,
+    # or the day a real-track phase drops one.
+    #
+    # Half-configured seasons are the one real hazard: a row that leaves a boundary of a
+    # phase empty is *in* that phase forever, and collides with the season really in it.
+    # The backend raises on the collision; the fix is to fill the instant in, never to
+    # special-case a phase.
+
+    #: Submissions open. `None` = no opening boundary.
+    submit_opens_at: datetime | None = None
+    #: Submissions close and the entry list is locked. `None` = never closes.
+    submit_closes_at: datetime | None = None
+    #: Evaluation starts. `None` = no starting boundary.
+    eval_starts_at: datetime | None = None
+    #: Evaluation ends, the season is settled and the payout plan is built.
+    #: `None` = no ending boundary.
+    eval_ends_at: datetime | None = None
+    #: When the champion is announced. Deliberately unordered against `eval_ends_at`:
+    #: nobody has decided which comes first, so no constraint pretends to know.
+    champion_announced_at: datetime | None = None
+
+    #: The base model's HuggingFace repository, `None` when this season has not named
+    #: one (the LingBot and xArm seasons have not). **Not the empty string** — `""`
+    #: builds a URL that resolves, so a consumer cannot tell it apart from a real value.
+    base_repo: Annotated[str, Field(min_length=1)] | None = None
+    #: The commit of the base model. `None` = **never pinned**, which is the truth for
+    #: π0.5 and is a different fact from `""`: the same treatment as
+    #: `Baseline.revision`, where `huggingface.co/{repo}/tree/{""}` silently lands on
+    #: the default branch and therefore on whatever the weights are today.
+    base_revision: Annotated[str, Field(min_length=1)] | None = None
+    #: The frozen spec — fee, qualification threshold, camera count, image size…
+    #: Read the class docstring before reading `params["fee"]["coldkey"]`.
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GET /api/weights — the exit where the money leaves
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2058,6 +2179,7 @@ __all__ = [
     "CODE_INVALID_SCORE",
     "CODE_INVALID_STAGE",
     "CODE_MISSING_ENVS",
+    "COMPETITION_STATUSES",
     "LEADERBOARD_STATUSES",
     "PROGRESS_DETAIL_KEYS",
     "QUEUE_SUMMARY_BUCKETS",
@@ -2070,6 +2192,8 @@ __all__ = [
     "BenchmarkMeta",
     "BenchmarkSpec",
     "Champion",
+    "Competition",
+    "CompetitionStatus",
     "Contract",
     "ContractError",
     "CurrentRoundResponse",
