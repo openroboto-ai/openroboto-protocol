@@ -12,14 +12,22 @@ everything with a single `decode FAILED` the way the old chain scanner did.
 
 from __future__ import annotations
 
+import dataclasses
+import json
+from pathlib import Path
+
 import pytest
 
+from openroboto_protocol import commitment as c
 from openroboto_protocol.commitment import (
     MAX_COMMITMENT_BYTES,
     CommitmentDecodeError,
+    CommitmentFieldError,
     CommitmentPayload,
     CommitmentTooLargeError,
     DecodeFailure,
+    Track,
+    check_payload,
     decode,
     encode,
 )
@@ -412,3 +420,294 @@ def test_payload_is_frozen() -> None:
     block_hash paired with that burn_tx" could happen."""
     with pytest.raises(AttributeError):
         decode(GV1_BYTES).payload.round_num = 99  # type: ignore[misc]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Derived vectors (NOT on-chain history)
+# ═══════════════════════════════════════════════════════════════════
+#
+# The `cid` key does not exist on chain yet: `sim seq=2` and the first real-track
+# season only go active once 0.7.0 has shipped. GV-5 and GV-6 are therefore
+# **derived and constructed values, not on-chain facts** — the discipline "change
+# one and you have rewritten history" applies to GV-1 ~ GV-4 above, not here.
+#
+# ⏳ When the first commitment carrying a `cid` is really on chain, come back and
+# replace GV-5 with the real bytes, and move it up into the on-chain section.
+
+# GV-5: a simulation payload that names its season — GV-1's fields plus `cid`.
+GV5_PAYLOAD = dataclasses.replace(GV1_PAYLOAD, competition_id=2)
+
+# GV-6: the real track. Worst case for every fixed-width field:
+#   s   48-character SS58
+#   h   64 hex characters
+#   c   40 hex characters
+#   r   one digit
+#   b   64 hex characters
+#   bb  7 digits
+#   cid the largest value a `bigint GENERATED ALWAYS AS IDENTITY` can hand out
+#   m   64 hex characters
+# which leaves `hf_repo_id` — the only variable-length field — as the budget.
+GV6_REAL_FIXED_BYTES = 368
+GV6_MAX_REPO_ID_CHARS = MAX_COMMITMENT_BYTES - GV6_REAL_FIXED_BYTES  # 144
+GV6_PAYLOAD = CommitmentPayload(
+    hotkey_ss58="5" + "D" * 47,
+    block_hash="a" * 64,
+    hf_commit="b" * 40,
+    round_num=9,
+    hf_repo_id="n" * 96 + "/" + "m" * 47,  # 144 characters, the limit
+    # Normalized form, with the `0x` decode() adds back; the chain stores the
+    # bare 64 characters.
+    burn_tx_hash="0x" + "c" * 64,
+    burn_block=8808331,
+    competition_id=9223372036854775807,
+    model_hash="d" * 64,
+)
+
+
+def test_sim_payload_without_cid_is_byte_identical_to_0_6_0() -> None:
+    """The single most expensive assertion in this repository: if it goes red,
+    every old miner is locked out on the day 0.7.0 ships.
+
+    Adding `cid` / `m` must leave the bytes of a payload that uses neither
+    completely untouched — the key must be **absent**, not `null`, because
+    `"cid":null` decodes the same but changes the byte count.
+    """
+    blob = encode(GV1_PAYLOAD)
+    assert blob == GV1_BYTES  # 295 real on-chain bytes
+    assert b'"cid"' not in blob
+    assert b'"m"' not in blob
+    assert json.loads(blob).keys() == {"s", "h", "c", "r", "i", "b", "bb"}
+
+
+def test_gv1_decodes_with_competition_id_none() -> None:
+    """An old miner's commitment has no `cid`, and that must be silent: `None`
+    means "the key was absent", and the caller reads the submission as
+    `(sim, seq=round_num)`. Raising here would reject every miner running today.
+    """
+    payload = decode(GV1_BYTES).payload
+    assert payload.competition_id is None
+    assert payload.model_hash is None
+
+
+def test_gv1_round_num_survives() -> None:
+    """`r` may not be tidied away. For a payload without `cid` it is the only
+    thing that locates the season, and the backend's backfill keys off exactly
+    this (`competitions.track='sim' AND seq=round_num`)."""
+    assert decode(GV1_BYTES).payload.round_num == 1
+    assert "round_num" in {f.name for f in dataclasses.fields(CommitmentPayload)}
+
+
+def test_gv5_sim_with_cid_round_trips() -> None:
+    """A simulation payload that names its season: `cid` comes back as it went
+    in, and the package does not infer a track from it."""
+    blob = encode(GV5_PAYLOAD)
+    assert decode(blob).payload == GV5_PAYLOAD
+    assert decode(blob).payload.competition_id == 2
+    assert decode(blob).payload.round_num == 1  # `r` still there next to `cid`
+    assert json.loads(blob).keys() == {"s", "h", "c", "r", "i", "b", "bb", "cid"}
+
+
+def test_gv6_real_carries_model_hash() -> None:
+    """`m` comes back verbatim. It is the one field that cannot be looked up
+    from `cid`, and on the real track it is what makes a private repository
+    trustworthy."""
+    payload = decode(encode(GV6_PAYLOAD)).payload
+    assert payload == GV6_PAYLOAD
+    assert payload.model_hash == "d" * 64
+    check_payload(payload, Track.REAL)  # a complete real-track payload
+
+
+def test_gv6_real_worst_case_fits_on_chain() -> None:
+    """Measured budget for the real track.
+
+    With every fixed-width field at its maximum the nine keys cost **368 bytes**,
+    so `hf_repo_id` may be up to **144 characters** and the payload is then
+    exactly 512 — zero headroom left, by construction.
+
+    ⚠️ The often-quoted "450 bytes, 62 to spare" only holds for an `hf_repo_id`
+    of at most 82 characters; it is not a worst case. HuggingFace allows
+    96 + 1 + 96 = 193 characters, and such a repo id does **not** fit on the real
+    track (561 bytes) — see the test below. One more 64-hex key would cost 71
+    bytes and cut the 144 characters down to 73.
+    """
+    blob = encode(GV6_PAYLOAD)
+    assert len(blob) == MAX_COMMITMENT_BYTES == 512
+    assert len(GV6_PAYLOAD.hf_repo_id) == GV6_MAX_REPO_ID_CHARS == 144
+    # The fixed cost is the number to quote when someone wants to add a key.
+    empty_repo = dataclasses.replace(GV6_PAYLOAD, hf_repo_id="")
+    assert len(encode(empty_repo)) == GV6_REAL_FIXED_BYTES == 368
+
+
+def test_a_real_payload_with_the_longest_possible_repo_id_is_refused() -> None:
+    """A 193-character repo id (HuggingFace's own maximum) exceeds 512 on the
+    real track, and it has to blow up **before** the entry fee is paid.
+
+    This is not a defect of the encoding, it is the budget: the real track's
+    nine keys leave 144 characters for the repo id. A miner in that position has
+    to rename the repository, and `CommitmentTooLargeError` says so.
+    """
+    too_long = dataclasses.replace(GV6_PAYLOAD, hf_repo_id="n" * 96 + "/" + "m" * 96)
+    with pytest.raises(CommitmentTooLargeError) as exc:
+        encode(too_long)
+    assert exc.value.size == 561
+    assert "hf_repo_id" in str(exc.value)
+
+
+def test_payload_never_contains_track_or_fee_keys() -> None:
+    """The three key sets are exactly 7 / 8 / 9 keys.
+
+    Asserting equality rather than `"t" not in ...` one key at a time: it blocks
+    `t` (the track is read from the season `cid` points at), `f` / `fb` (the fee
+    reuses `b` / `bb`) **and** any unforeseen key, without needing a new
+    assertion per banned name.
+    """
+    assert len(json.loads(encode(GV1_PAYLOAD))) == 7
+    assert len(json.loads(encode(GV5_PAYLOAD))) == 8
+    assert json.loads(encode(GV6_PAYLOAD)).keys() == {
+        "s",
+        "h",
+        "c",
+        "r",
+        "i",
+        "b",
+        "bb",
+        "cid",
+        "m",
+    }
+
+
+def test_unknown_keys_are_ignored_not_rejected() -> None:
+    """Adding a key is a minor bump, so an older copy of this package has to be
+    able to read a payload written by a newer one. `UNKNOWN_SCHEMA` means "not
+    one known key", not "a key I have not seen"."""
+    newer = dict(json.loads(GV1_JSON), t="sim", f="0xdeadbeef")
+    payload = decode(json.dumps(newer).encode()).payload
+    assert payload == GV1_PAYLOAD  # the two extra keys land nowhere
+    assert payload.competition_id is None
+
+
+def test_golden_vector_sections_are_labelled() -> None:
+    """The on-chain section and the derived section must stay marked as such.
+
+    Mixing them is the one mistake this file can make: "changing a vector
+    rewrites history" is only true of the on-chain ones, and if the derived ones
+    look like history nobody will dare replace GV-5 with the real bytes once
+    they exist.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    assert "Derived vectors (NOT on-chain history)" in source
+    assert "on-chain facts; changing them rewrites history" in source
+
+
+# ═══════════════════════════════════════════════════════════════════
+# check_payload — the pre-flight both sides share
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_check_payload_accepts_an_old_style_simulation_payload() -> None:
+    """GV-1 is what a simulation miner sends today, and it must keep passing."""
+    check_payload(GV1_PAYLOAD, Track.SIM)
+
+
+@pytest.mark.parametrize("bad", ["b" * 39, "b" * 41, "B" * 40, "", "g" * 40])
+def test_check_payload_rejects_a_malformed_hf_commit(bad: str) -> None:
+    """40 lowercase hex characters, on both tracks. Uppercase is rejected too:
+    the same commit in two spellings would be two different byte streams and two
+    different deduplication keys."""
+    with pytest.raises(CommitmentFieldError) as exc:
+        check_payload(dataclasses.replace(GV1_PAYLOAD, hf_commit=bad), Track.SIM)
+    assert exc.value.field == "c"
+
+
+def test_check_payload_demands_a_model_hash_on_the_real_track() -> None:
+    """Missing `m` names the missing key. It cannot be looked up from `cid` —
+    the repository may be private — so a real-track submission without it can
+    never be verified."""
+    without_m = dataclasses.replace(GV6_PAYLOAD, model_hash=None)
+    with pytest.raises(CommitmentFieldError) as exc:
+        check_payload(without_m, Track.REAL)
+    assert exc.value.field == "m"
+    assert "model_hash" in str(exc.value)
+    # ...and the same payload is perfectly legal on the simulation track.
+    check_payload(without_m, Track.SIM)
+
+
+@pytest.mark.parametrize("bad", ["d" * 63, "d" * 65, "D" * 64, "", "z" * 64])
+def test_check_payload_rejects_a_malformed_model_hash(bad: str) -> None:
+    """64 lowercase hex characters — the shape `model_hash.py` produces."""
+    with pytest.raises(CommitmentFieldError) as exc:
+        check_payload(dataclasses.replace(GV6_PAYLOAD, model_hash=bad), Track.REAL)
+    assert exc.value.field == "m"
+
+
+def test_check_payload_demands_a_competition_id_on_the_real_track() -> None:
+    """Without `cid` a real-track submission is read as `(sim, seq=round_num)` —
+    it would land on the simulation leaderboard with the entry fee spent."""
+    with pytest.raises(CommitmentFieldError) as exc:
+        check_payload(dataclasses.replace(GV6_PAYLOAD, competition_id=None), Track.REAL)
+    assert exc.value.field == "cid"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Track — the value set of competitions.track
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_track_has_exactly_two_values() -> None:
+    """The same two words as the `ck_competitions_track` CHECK in the backend's
+    0003 migration."""
+    assert sorted(t.value for t in Track) == ["real", "sim"]
+
+
+def test_track_rejects_an_unknown_value_loudly() -> None:
+    """An unknown track must raise and the message must carry the value.
+    Falling back to `sim` would silently move a real-track submission onto the
+    simulation leaderboard."""
+    with pytest.raises(ValueError, match="banana"):
+        Track("banana")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# The public surface
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_module_exports_are_pinned() -> None:
+    """`__all__` is the public surface, and the public surface is what the
+    version number promises. Without this test there is no line between a patch
+    and a breaking change."""
+    assert c.__all__ == [
+        "MAX_COMMITMENT_BYTES",
+        "PAYLOAD_KEYS",
+        "CommitmentDecodeError",
+        "CommitmentFieldError",
+        "CommitmentPayload",
+        "CommitmentTooLargeError",
+        "DecodeFailure",
+        "DecodedCommitment",
+        "Track",
+        "check_payload",
+        "decode",
+        "encode",
+    ]
+    assert all(hasattr(c, name) for name in c.__all__)
+
+
+def test_payload_keys_are_the_nine_on_chain_names() -> None:
+    """In the order `encode()` writes them: new keys are appended, never
+    inserted, so that payloads which do not use them keep their bytes."""
+    assert c.PAYLOAD_KEYS == ("s", "h", "c", "r", "i", "b", "bb", "cid", "m")
+
+
+def test_decode_keeps_a_present_but_unusable_cid_out_of_the_none_branch() -> None:
+    """`"cid":"banana"` is not the same thing as "no cid at all".
+
+    A miner who mistyped the season must fail loudly at season lookup (0 is not
+    a value an identity primary key hands out); reading it as `None` would send
+    the submission to `(sim, seq=r)` with the fee already spent.
+    """
+    assert decode('{"i":"u/r","cid":"banana"}').payload.competition_id == 0
+    assert decode('{"i":"u/r","cid":"7"}').payload.competition_id == 7
+    assert decode('{"i":"u/r","cid":null}').payload.competition_id is None
+    # A non-string `m` is "unusable", not "absent" — check_payload rejects it.
+    assert decode('{"i":"u/r","m":123}').payload.model_hash == ""

@@ -21,8 +21,48 @@ already eat half of it. Changing a key name = major.
 | `c` | `hf_commit` | HuggingFace commit SHA, 40 hex characters |
 | `r` | `round_num` | round number |
 | `i` | `hf_repo_id` | HuggingFace repo id, e.g. `kyleab/pi05-scmGbsBoEmiQ` |
-| `b` | `burn_tx_hash` | burn transaction hash, **stored on chain without `0x`** |
-| `bb` | `burn_block` | the block the burn is in; encoded as `null` when it is 0 |
+| `b` | `burn_tx_hash` | **payment credential: which transaction**, no `0x` |
+| `bb` | `burn_block` | **payment credential: which block**; `null` when it is 0 |
+| `cid` | `competition_id` | which season it is for; **absent on old payloads** |
+| `m` | `model_hash` | the model fingerprint, **required on the real track** |
+
+Three key sets exist on chain, and all three have to decode:
+
+    old miner   s h c r i b bb           no `cid`  → the caller reads it as (sim, r)
+    simulation  s h c r i b bb cid
+    real robot  s h c r i b bb cid m
+
+### Three keys that are deliberately absent
+
+* **No `t` (track).** The track is `competitions.track` on the row `cid` points
+  at — one lookup away. Storing a second copy on chain creates a source that
+  can disagree with the database, and when a miner writes `t:"sim"` while `cid`
+  points at a real-track season there is no rule that says which one wins.
+* **No `f` / `fb` (fee).** `b` / `bb` *are* the payment credential. Whether that
+  payment was a burn (simulation: `add_stake_burn`) or a plain transfer to the
+  season's coldkey (real track) is decided by the season `cid` points at, so a
+  second pair of keys would only be a second way to say the same thing.
+* **`r` is not removed.** Until the six tenant keys are re-keyed onto
+  `competition_id` it is the safety net, and for a payload without `cid` it is
+  the *only* thing that locates the season: `(sim, seq=r)`.
+
+### The byte budget, measured
+
+`hf_repo_id` is the only variable-length field, so the budget is best read as
+"how many characters are left for it" (`CommitmentTooLargeError` says exactly
+that). Measured with a 48-character SS58, 64-hex `h` and `b`, a 40-hex `c`, a
+7-digit `bb`, a 64-hex `m` and the largest cid a `bigint` primary key can
+produce:
+
+    simulation (7 keys)   271 bytes fixed  →  hf_repo_id up to 241 characters
+    real robot (9 keys)   368 bytes fixed  →  hf_repo_id up to 144 characters
+
+⚠️ **One more 64-hex key costs 71 bytes** and would cut the real track's repo-id
+room from 144 characters down to 73. HuggingFace itself allows up to 96 + 1 + 96
+= 193 characters, so a real-track miner with a very long repo name is already
+over the limit and has to rename before submitting — `encode()` raises before
+the fee is paid, which is the only moment the money can still be saved. Measure
+before adding a key; there is no room left to be casual with.
 
 ## Two asymmetries that must be remembered
 
@@ -99,14 +139,59 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
 
+#: The public surface of this module. What is not listed here is an
+#: implementation detail and may change in a patch release — without it there is
+#: no line between `patch` and `major` (AGENTS.md §1②).
+__all__ = [
+    "MAX_COMMITMENT_BYTES",
+    "PAYLOAD_KEYS",
+    "CommitmentDecodeError",
+    "CommitmentFieldError",
+    "CommitmentPayload",
+    "CommitmentTooLargeError",
+    "DecodeFailure",
+    "DecodedCommitment",
+    "Track",
+    "check_payload",
+    "decode",
+    "encode",
+]
+
 # The hard limit of `Data::BigRaw`. An extrinsic longer than this is rejected by
 # the chain — and the burn is spent before the submission, so it must be caught
 # before the money is spent.
 MAX_COMMITMENT_BYTES: Final = 512
 
-# All known keys of the on-chain JSON. At decode time, "not one of them is
-# recognized" = the other side is not a client of this protocol.
-PAYLOAD_KEYS: Final = ("s", "h", "c", "r", "i", "b", "bb")
+# All known keys of the on-chain JSON, in the order `encode()` writes them. At
+# decode time, "not one of them is recognized" = the other side is not a client
+# of this protocol.
+#
+# New keys are appended at the end, never inserted in the middle: the byte
+# stream of a payload that does not use them has to stay identical, and key
+# order is part of that.
+PAYLOAD_KEYS: Final = ("s", "h", "c", "r", "i", "b", "bb", "cid", "m")
+
+# The characters of a lowercase hex digest. `hf_commit` is 40 of them and
+# `model_hash` is 64; both checks live here so that the CLI (before the fee is
+# paid) and the backend (when the submission is ingested) cannot disagree.
+_HEX: Final = frozenset("0123456789abcdef")
+
+
+class Track(StrEnum):
+    """The two tracks of the subnet — the value set of `competitions.track`.
+
+    ⚠️ **It is not read from the payload**: there is no `t` key on chain (see the
+    module docstring). The side that can resolve the season row — the backend —
+    supplies it, and `check_payload()` takes it as an argument.
+
+    An unknown value raises `ValueError: 'banana' is not a valid Track`, which
+    carries the offending value. Silently treating it as `sim` would put a
+    real-track submission on the simulation leaderboard *after* the miner has
+    already paid the entry fee.
+    """
+
+    SIM = "sim"
+    REAL = "real"
 
 
 class DecodeFailure(StrEnum):
@@ -175,6 +260,23 @@ class CommitmentTooLargeError(ValueError):
         self.size = size
 
 
+class CommitmentFieldError(ValueError):
+    """A field of the payload is missing or malformed for the track it is meant
+    for. `field` is the on-chain key, so a caller can name it to the miner.
+
+    Raised only by `check_payload()`, never by `decode()`: what is already on
+    chain has to be readable no matter how wrong it is (empty `hf_commit`
+    payloads exist in production), while what is about to *go* on chain must be
+    stopped — the entry fee is paid before the commitment is written, and a
+    rejected commitment does not give the money back.
+    """
+
+    def __init__(self, field: str, problem: str, value: object) -> None:
+        super().__init__(f"{field}: {problem} (got {value!r})")
+        #: The on-chain key, e.g. `m` — not the Python attribute name.
+        self.field = field
+
+
 @dataclass(frozen=True)
 class CommitmentPayload:
     """All the on-chain fields of one submission — they must come from the same
@@ -210,7 +312,14 @@ class CommitmentPayload:
     """HuggingFace repo id, on chain `i`, e.g. `kyleab/pi05-scmGbsBoEmiQ`."""
 
     burn_tx_hash: str
-    """Burn transaction hash, on chain `b`.
+    """**Payment credential: which transaction.** On chain `b`.
+
+    Whether that payment is a burn (simulation) or a transfer to the season's
+    coldkey (real track) is decided by the season `cid` points at — there is no
+    second pair of keys for it. The Python field keeps its historical name;
+    renaming it would be a major bump for no gain (the backend's columns are
+    already called `payment_tx_hash` / `payment_block`, and the three layers
+    being spelled differently is deliberate).
 
     What is stored on chain does **not** have the `0x`; `decode()` adds `0x`
     when it decodes and `encode()` strips it when it writes back. The
@@ -218,8 +327,36 @@ class CommitmentPayload:
     normalized form."""
 
     burn_block: int
-    """The block the burn is in, on chain `bb`. 0 means the miner did not report
-    it, and it is written as `null` when encoding."""
+    """**Payment credential: which block.** On chain `bb`. 0 means the miner did
+    not report it, and it is written as `null` when encoding."""
+
+    competition_id: int | None = None
+    """Which season this submission is for, on chain `cid`. The primary key of
+    the backend's `competitions` row, so it is an integer, not a string.
+
+    `None` = **the key was absent**, which is every commitment written before
+    0.7.0. The caller then reads the submission as `(sim, seq=round_num)`; that
+    fallback is the reason `r` may not be removed. When it is present the caller
+    uses it as-is — track, base model, fee and format rules are all read off
+    that row, and a `cid` that resolves to nothing must fail loudly rather than
+    fall back to simulation.
+
+    ⚠️ `encode()` **omits the key entirely** when this is `None`. Writing
+    `"cid":null` would decode the same but change the byte stream, and every
+    byte-for-byte comparison against the old miners' payloads would blow up."""
+
+    model_hash: str | None = None
+    """The model fingerprint, on chain `m`, 64 lowercase hex characters.
+
+    **Required on the real track** (`check_payload`). Everything that can be
+    looked up from `cid` stays off the payload; this is the one exception,
+    because it cannot be looked up: the real track allows private repositories,
+    so the backend cannot pull the weights and compute the fingerprint itself
+    before evaluating. The miner pins it on chain first and it is compared at
+    evaluation time — that is what makes a private repository trustworthy at
+    all.
+
+    `None` on simulation payloads, and the key is then not written."""
 
 
 @dataclass(frozen=True)
@@ -257,14 +394,18 @@ def encode(payload: CommitmentPayload) -> bytes:
 
     The compact form of `json.dumps(separators=(",", ":"))` plus the fixed key
     order `s,h,c,r,i,b,bb` is an established fact of the historical on-chain
-    data (see tests/test_golden_vectors.py). A different key order would not
-    fail to decode, but the bytes would no longer match — and any check that
-    compares byte by byte would blow up.
+    data (see tests/test_commitment.py). A different key order would not fail to
+    decode, but the bytes would no longer match — and any check that compares
+    byte by byte would blow up.
+
+    `cid` and `m` are appended after `bb`, and **a key whose value is `None` is
+    not written at all**. So a payload that uses neither — every old miner —
+    encodes to exactly the same bytes as it did before 0.7.0.
 
     Beyond 512 bytes it raises `CommitmentTooLargeError`: such a payload cannot
-    go on chain, and by that point the miner has already burned TAO.
+    go on chain, and by that point the miner has already paid.
     """
-    data = {
+    data: dict[str, object] = {
         "s": payload.hotkey_ss58,
         "h": _strip_0x(payload.block_hash),
         "c": payload.hf_commit,
@@ -274,6 +415,10 @@ def encode(payload: CommitmentPayload) -> bytes:
         # Writing 0 as null is the historical shape, not a typo.
         "bb": payload.burn_block or None,
     }
+    if payload.competition_id is not None:
+        data["cid"] = payload.competition_id
+    if payload.model_hash is not None:
+        data["m"] = payload.model_hash
     blob = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     if len(blob) > MAX_COMMITMENT_BYTES:
         raise CommitmentTooLargeError(len(blob))
@@ -336,7 +481,62 @@ def decode(raw: object) -> DecodedCommitment:
     )
 
 
+def check_payload(payload: CommitmentPayload, track: Track) -> None:
+    """Everything about a payload that can be checked without the chain or the
+    database. Call it **before the entry fee is paid**; raises
+    `CommitmentFieldError` naming the offending on-chain key.
+
+    Both sides call it, which is the whole point: the CLI in its pre-flight, the
+    backend when it ingests the commitment and knows which season — and
+    therefore which track — the payload belongs to. Two hand-written copies of
+    "what does the real track require" is how the field set drifts.
+
+    ⚠️ It is **not** called by `decode()`. History has to stay readable: empty
+    `hf_commit` values are on chain already, and rejecting them at decode time
+    would delete those submissions from the backend's view.
+
+    What it does not answer: whether the season exists, whether it is open,
+    whether the payment cleared, whether the repo is reachable. All of those
+    need I/O and stay in the caller.
+    """
+    if not _is_lower_hex(payload.hf_commit, 40):
+        raise CommitmentFieldError(
+            "c", "hf_commit must be 40 lowercase hex characters", payload.hf_commit
+        )
+    if track is Track.SIM:
+        return
+    # The real track, and only the real track, adds two requirements.
+    if payload.competition_id is None:
+        raise CommitmentFieldError(
+            "cid",
+            "a real-track submission must name its season; without it the "
+            "submission is read as (sim, seq=round_num)",
+            None,
+        )
+    if payload.model_hash is None:
+        raise CommitmentFieldError(
+            "m",
+            "a real-track submission must carry model_hash — the repo may be "
+            "private, so the backend cannot compute the fingerprint itself",
+            None,
+        )
+    if not _is_lower_hex(payload.model_hash, 64):
+        raise CommitmentFieldError(
+            "m", "model_hash must be 64 lowercase hex characters", payload.model_hash
+        )
+
+
 # ─── Internal implementation ─────────────────────────────────
+
+
+def _is_lower_hex(value: str, length: int) -> bool:
+    """Exactly `length` characters, all of them lowercase hex.
+
+    Uppercase is rejected on purpose: the same digest in two spellings would
+    produce two different on-chain byte streams and two different deduplication
+    keys.
+    """
+    return len(value) == length and _HEX.issuperset(value)
 
 
 def _strip_0x(value: str) -> str:
@@ -455,6 +655,14 @@ def _payload_from_mapping(data: Mapping[Any, Any]) -> CommitmentPayload:
     burn_tx_hash = _as_str(data.get("b"))
     if burn_tx_hash and not burn_tx_hash.startswith("0x"):
         burn_tx_hash = f"0x{burn_tx_hash}"
+    # `cid` absent or null → None → the caller reads the submission as
+    # (sim, seq=round_num). Present but unusable (`"cid":"banana"`) → 0, which
+    # no `bigint GENERATED AS IDENTITY` primary key can ever be, so the season
+    # lookup fails loudly. Degrading it to None instead would put a miner who
+    # mistyped the season on the simulation leaderboard, with the entry fee
+    # already spent.
+    raw_cid = data.get("cid")
+    model_hash = data.get("m")
     return CommitmentPayload(
         hotkey_ss58=_as_str(data.get("s")),
         # No `0x` is added: the miner's self-reported value is returned as-is,
@@ -465,4 +673,9 @@ def _payload_from_mapping(data: Mapping[Any, Any]) -> CommitmentPayload:
         hf_repo_id=_as_str(data.get("i")),
         burn_tx_hash=burn_tx_hash,
         burn_block=_as_int(data.get("bb")),
+        competition_id=None if raw_cid is None else _as_int(raw_cid),
+        # A non-string `m` is "the miner wrote something unusable", not "no
+        # fingerprint": it is kept as an empty string so `check_payload()`
+        # rejects it, rather than being silently indistinguishable from absent.
+        model_hash=None if model_hash is None else _as_str(model_hash),
     )
