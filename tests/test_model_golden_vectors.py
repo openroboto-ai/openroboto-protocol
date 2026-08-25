@@ -435,6 +435,7 @@ LINGBOT_REFERENCE_TREE = _tree(
 # ── The vendor's official post-trained artifact ───────────────────────────
 #
 # repo=robbyant/lingbot-vla-v2-6b-robotwin  published=2026-07-24  listed=2026-08-25
+# revision=0451855729ec904f970600e0aec8b84661423afe
 #
 # 🔴 This is the tree a miner copies. The vendor fine-tuned the base model above
 # on RoboTwin and published the result **as the training script wrote it**:
@@ -442,39 +443,76 @@ LINGBOT_REFERENCE_TREE = _tree(
 # three levels down under ``checkpoints/global_step_50000/hf_ckpt/``. Full
 # weights over six shards (25.5 GB), not an adapter.
 #
-# Provenance, stated exactly, because half of this fixture is inherited rather
-# than observed:
-#   - the **paths** are that repo's listing, and they are the whole point of
-#     this vector;
-#   - the **byte sizes** are carried over from ``LINGBOT_REFERENCE_TREE`` above.
-#     The two repos hold the same files at the same tensor shapes and dtype, and
-#     nothing asserted below depends on the exact numbers — only on the total
-#     clearing ``MIN_TOTAL_SIZE_BYTES``. ``lingbotvla_cli.yaml`` has no
-#     counterpart in the base repo at all; its size is a placeholder;
-#   - the **lfs oids** are left out rather than invented, so this tree carries no
-#     ``model_hash`` expectation. There is no on-chain fingerprint for it either.
+# Provenance: type / size / path / lfs.oid are that revision's listing verbatim,
+# fetched the same way as the four trees above. The oids were **missing from
+# this fixture until 2026-08-25** and were filled in by the fingerprint audit —
+# they are what makes the two LingBot trees comparable, and the comparison is
+# the point (see the fingerprint cases at the bottom of this file). The tree
+# still carries no expected ``model_hash``: no on-chain fingerprint for it
+# exists, and inventing one would be the opposite of what a golden vector is.
 _HF_CKPT = "checkpoints/global_step_50000/hf_ckpt"
 
 LINGBOT_POST_TRAINED_TREE = _tree(
-    ("file", 1797, ".gitattributes"),
-    ("file", 2227, "README.md"),
-    ("file", 1024, "lingbotvla_cli.yaml"),
-    ("file", 1178043, "assets/lingbot_vla2_framework.png"),
+    ("file", 1678, ".gitattributes"),
+    ("file", 2752, "README.md"),
+    (
+        "file",
+        234893,
+        "assets/lingbot_vla2_framework.png",
+        "5e7fccb501606ae27383bbb0c5e6d6824a5cdcaa9a2534488b5af059bb7e13d7",
+    ),
     ("file", 707, f"{_HF_CKPT}/added_tokens.json"),
+    ("file", 5292, f"{_HF_CKPT}/chat_template.jinja"),
     ("file", 31, f"{_HF_CKPT}/config.json"),
-    ("file", 4987151072, f"{_HF_CKPT}/model-00001-of-00006.safetensors"),
-    ("file", 4985113408, f"{_HF_CKPT}/model-00002-of-00006.safetensors"),
-    ("file", 4928593216, f"{_HF_CKPT}/model-00003-of-00006.safetensors"),
-    ("file", 4990740540, f"{_HF_CKPT}/model-00004-of-00006.safetensors"),
-    ("file", 4990095864, f"{_HF_CKPT}/model-00005-of-00006.safetensors"),
-    ("file", 622195024, f"{_HF_CKPT}/model-00006-of-00006.safetensors"),
+    (
+        "file",
+        4947507248,
+        f"{_HF_CKPT}/model-00001-of-00006.safetensors",
+        "514801684e0f23aaa4bb64a4fd81e420b97e094331499852d5f2cc567750b360",
+    ),
+    (
+        "file",
+        4944315304,
+        f"{_HF_CKPT}/model-00002-of-00006.safetensors",
+        "e7b00cf59b21c2f5e9f76f7687ba423c6fe24bfa9fa8e313ef346bb081e73c9f",
+    ),
+    (
+        "file",
+        4944315360,
+        f"{_HF_CKPT}/model-00003-of-00006.safetensors",
+        "ace74f6d5214059b6387b5728c570a452d51b5950dd9904fe29607dbfa41447b",
+    ),
+    (
+        "file",
+        4992858968,
+        f"{_HF_CKPT}/model-00004-of-00006.safetensors",
+        "1f1cb6b4099e264b202eae0244f3730e1ced910c0b34355fff2a719993d0cbe5",
+    ),
+    (
+        "file",
+        4963062048,
+        f"{_HF_CKPT}/model-00005-of-00006.safetensors",
+        "1316d6fe054253650dc65bae416ae6cf9afa283aad82a9712b02b0dd7029394b",
+    ),
+    (
+        "file",
+        711830844,
+        f"{_HF_CKPT}/model-00006-of-00006.safetensors",
+        "0e1dfc6a23c43f3c387276e2389799867dfa90dc9727bb8e21250c73bfe7dd23",
+    ),
     ("file", 207389, f"{_HF_CKPT}/model.safetensors.index.json"),
     ("file", 782, f"{_HF_CKPT}/preprocessor_config.json"),
     ("file", 613, f"{_HF_CKPT}/special_tokens_map.json"),
-    ("file", 11422654, f"{_HF_CKPT}/tokenizer.json"),
+    (
+        "file",
+        11422654,
+        f"{_HF_CKPT}/tokenizer.json",
+        "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+    ),
     ("file", 5472, f"{_HF_CKPT}/tokenizer_config.json"),
     ("file", 817, f"{_HF_CKPT}/video_preprocessor_config.json"),
     ("file", 2776833, f"{_HF_CKPT}/vocab.json"),
+    ("file", 6263, "lingbotvla_cli.yaml"),
 )
 
 #: The six shard names of ``LINGBOT_REFERENCE_TREE``, and one real tensor name
@@ -772,6 +810,66 @@ def test_lingbot_fingerprint_is_not_only_the_weights() -> None:
     )
 
 
+def _lfs_oids(tree: list[dict[str, Any]]) -> dict[str, str]:
+    return {e["path"]: e["lfs"]["oid"] for e in tree if e.get("lfs")}
+
+
+def test_fine_tuning_leaves_no_shard_byte_identical() -> None:
+    """🔴 The false-positive direction, measured on the vendor's own two repos.
+
+    The fear this answers: LingBot ships 25.5 GB over six shards while a miner
+    only moves some of the parameters, so two miners might end up sharing whole
+    shards byte for byte and be marked as copies of each other. On the only real
+    before/after pair that exists — the base model and the vendor's RoboTwin
+    post-trained artifact — **not one of the six shards survives**: 0 of 6 oids
+    match. The single LFS file the two repos share is ``tokenizer.json``, which
+    is not a weight at all.
+
+    Even that overlap cannot cause a false positive: the fingerprint is one
+    sha256 over the **whole** sorted oid list, so it is all-or-nothing. Sharing
+    11 of 12 files produces a completely unrelated fingerprint, not a near miss
+    — there is no per-shard matching anywhere in the algorithm. A collision
+    still means every LFS file is byte-identical.
+    """
+    base, post = _lfs_oids(LINGBOT_REFERENCE_TREE), _lfs_oids(LINGBOT_POST_TRAINED_TREE)
+    shards = {p: o for p, o in post.items() if p.endswith(".safetensors")}
+    assert len(shards) == 6
+    assert not set(shards.values()) & set(base.values())
+
+    shared = set(base.values()) & set(post.values())
+    assert shared == {base["tokenizer.json"]}
+
+    assert model_hash_from_hf_tree(
+        LINGBOT_POST_TRAINED_TREE
+    ) != model_hash_from_hf_tree(LINGBOT_REFERENCE_TREE)
+
+
+def test_lingbot_shard_bytes_are_export_dependent() -> None:
+    """🔴 The false-negative direction: the same tensors can land in different
+    shard bytes, and then the fingerprint no longer recognises them.
+
+    Both revisions' ``model.safetensors.index.json`` name **the same 1708
+    tensors** and declare the same ``total_size`` (25 503 630 044 bytes), yet
+    **1446 of those 1708 tensors sit in a different shard file** in the
+    post-trained repo, and no two shards have the same length. Where a tensor
+    lands is a property of whoever ran the export — not of the weights.
+
+    So "same weights, re-exported" is not guaranteed to produce the same
+    fingerprint, and pinning the six shard names does not fix it. Catching that
+    would mean hashing tensors rather than files, which is a different algorithm
+    and a different decision; this case only stops the risk from being forgotten.
+    """
+    sizes = {
+        name: sorted(e["size"] for e in tree if e["path"].endswith(".safetensors"))
+        for name, tree in (
+            ("base", LINGBOT_REFERENCE_TREE),
+            ("post", LINGBOT_POST_TRAINED_TREE),
+        )
+    }
+    assert not set(sizes["base"]) & set(sizes["post"])
+    assert abs(sum(sizes["base"]) - sum(sizes["post"])) < 1024
+
+
 def test_lingbot_fingerprint_survives_a_repo_rename() -> None:
     """The property dedup actually depends on: same weights, different repo, same
     fingerprint. Paths are not part of the input, so this holds unchanged."""
@@ -793,13 +891,14 @@ def test_golden_tree_count_is_pinned() -> None:
 
 def test_lingbot_fixtures_declare_their_source() -> None:
     """A fixture with no provenance only proves the code matches whoever wrote
-    it. Keep repo / revision / date next to the tree — and for the post-trained
-    one, which inherits its byte sizes, say which half was observed."""
+    it. Keep repo / revision / date next to the tree — both LingBot trees are
+    now observed listings, and the pinned revision is what makes that checkable
+    by anyone else."""
     source = Path(__file__).read_text(encoding="utf-8")
     header = source.split("LINGBOT_REFERENCE_TREE = _tree(")[0][-900:]
     for marker in ("repo=", "revision=", "fetched="):
         assert marker in header, marker
 
     post_header = source.split("LINGBOT_POST_TRAINED_TREE = _tree(")[0][-1600:]
-    for marker in ("repo=", "published=", "listed=", "Provenance"):
+    for marker in ("repo=", "revision=", "published=", "listed=", "Provenance"):
         assert marker in post_header, marker
