@@ -38,19 +38,24 @@ All three trees passed production admission and entered the evaluation queue, so
 there is only one possible meaning when a layout case goes red: the new rule
 would reject real miners, and must not ship.
 
-The fourth tree is of a different kind
---------------------------------------
-``LINGBOT_REFERENCE_TREE`` is **not** a production submission — no LingBot-VLA
-round has run yet, and by the time one has, the rules that would have to be
-right on day one are already shipped. It is the vendor's published reference
-checkpoint, which is the only real LingBot tree that exists today. It carries no
-expected ``model_hash``: no on-chain fingerprint for it exists, and inventing
-one would be the opposite of what a golden vector is.
+The last two trees are of a different kind
+------------------------------------------
+``LINGBOT_REFERENCE_TREE`` and ``LINGBOT_POST_TRAINED_TREE`` are **not**
+production submissions — no LingBot-VLA round has run yet, and by the time one
+has, the rules that would have to be right on day one are already shipped. They
+are the vendor's two published checkpoints, the only real LingBot trees that
+exist today: the base model, and the RoboTwin post-trained artifact miners are
+shown as an example of a finished model. Neither carries an expected
+``model_hash``: no on-chain fingerprint for them exists, and inventing one would
+be the opposite of what a golden vector is.
 
-What the LingBot cases pin is **mutual exclusion**: the openpi rules keep
-accepting the three real openpi repos, and neither set of rules accepts the
-other side's tree. Losing the first half means every existing miner is rejected
-on the day the new base model ships.
+What the LingBot cases pin is **mutual exclusion** plus **the cost of copying
+the example**: the openpi rules keep accepting the three real openpi repos,
+neither set of rules accepts the other side's tree, and the post-trained
+artifact — uploaded unchanged — is admitted with exactly one warning, the one
+that says the evaluator will not find the weights. Losing the first half means
+every existing miner is rejected on the day the new base model ships; losing the
+last one means they burn first and find out afterwards.
 """
 
 from __future__ import annotations
@@ -427,6 +432,51 @@ LINGBOT_REFERENCE_TREE = _tree(
     ("file", 2776833, "vocab.json"),
 )
 
+# ── The vendor's official post-trained artifact ───────────────────────────
+#
+# repo=robbyant/lingbot-vla-v2-6b-robotwin  published=2026-07-24  listed=2026-08-25
+#
+# 🔴 This is the tree a miner copies. The vendor fine-tuned the base model above
+# on RoboTwin and published the result **as the training script wrote it**:
+# ``lingbotvla_cli.yaml`` alone at the repo root, and the whole HF checkpoint
+# three levels down under ``checkpoints/global_step_50000/hf_ckpt/``. Full
+# weights over six shards (25.5 GB), not an adapter.
+#
+# Provenance, stated exactly, because half of this fixture is inherited rather
+# than observed:
+#   - the **paths** are that repo's listing, and they are the whole point of
+#     this vector;
+#   - the **byte sizes** are carried over from ``LINGBOT_REFERENCE_TREE`` above.
+#     The two repos hold the same files at the same tensor shapes and dtype, and
+#     nothing asserted below depends on the exact numbers — only on the total
+#     clearing ``MIN_TOTAL_SIZE_BYTES``. ``lingbotvla_cli.yaml`` has no
+#     counterpart in the base repo at all; its size is a placeholder;
+#   - the **lfs oids** are left out rather than invented, so this tree carries no
+#     ``model_hash`` expectation. There is no on-chain fingerprint for it either.
+_HF_CKPT = "checkpoints/global_step_50000/hf_ckpt"
+
+LINGBOT_POST_TRAINED_TREE = _tree(
+    ("file", 1797, ".gitattributes"),
+    ("file", 2227, "README.md"),
+    ("file", 1024, "lingbotvla_cli.yaml"),
+    ("file", 1178043, "assets/lingbot_vla2_framework.png"),
+    ("file", 707, f"{_HF_CKPT}/added_tokens.json"),
+    ("file", 31, f"{_HF_CKPT}/config.json"),
+    ("file", 4987151072, f"{_HF_CKPT}/model-00001-of-00006.safetensors"),
+    ("file", 4985113408, f"{_HF_CKPT}/model-00002-of-00006.safetensors"),
+    ("file", 4928593216, f"{_HF_CKPT}/model-00003-of-00006.safetensors"),
+    ("file", 4990740540, f"{_HF_CKPT}/model-00004-of-00006.safetensors"),
+    ("file", 4990095864, f"{_HF_CKPT}/model-00005-of-00006.safetensors"),
+    ("file", 622195024, f"{_HF_CKPT}/model-00006-of-00006.safetensors"),
+    ("file", 207389, f"{_HF_CKPT}/model.safetensors.index.json"),
+    ("file", 782, f"{_HF_CKPT}/preprocessor_config.json"),
+    ("file", 613, f"{_HF_CKPT}/special_tokens_map.json"),
+    ("file", 11422654, f"{_HF_CKPT}/tokenizer.json"),
+    ("file", 5472, f"{_HF_CKPT}/tokenizer_config.json"),
+    ("file", 817, f"{_HF_CKPT}/video_preprocessor_config.json"),
+    ("file", 2776833, f"{_HF_CKPT}/vocab.json"),
+)
+
 #: The six shard names of ``LINGBOT_REFERENCE_TREE``, and one real tensor name
 #: per required prefix, copied out of the ``weight_map`` of that revision's
 #: ``model.safetensors.index.json`` (1708 tensors in total; the whole map is not
@@ -485,6 +535,80 @@ def test_lingbot_reference_tree_is_accepted() -> None:
     assert report.ok, report.errors
     assert report.kind is CheckpointKind.PYTORCH
     assert report.warnings == ()
+
+
+def test_lingbot_post_trained_artifact_warns_only_about_nesting() -> None:
+    """🔴 The official post-trained artifact, judged as it is published.
+
+    Admitted (``ok``), recognized as ``pytorch``, and carrying exactly one
+    warning: the weights are one level below what the evaluator searches. That
+    combination is the worst outcome in the whole file — a submission that gets
+    in, burns the TAO, takes the queue slot, and then fails at the last step,
+    while the miner did nothing but upload what the vendor's own example looks
+    like.
+
+    Two things go red here, and both should:
+
+    - dropping or renaming the nesting warning → the miner loses the only notice
+      they get before paying;
+    - raising ``MAX_CHECKPOINT_NESTING_DEPTH`` to 3 → the warning disappears and
+      this test fails, which is correct: the constant belongs to
+      ``openroboto-evaluation``, and changing our copy does not make the
+      evaluator search deeper.
+    """
+    report = check_lingbot_layout(
+        _files(LINGBOT_POST_TRAINED_TREE),
+        LINGBOT_LAYOUT_FIXTURE,
+        weight_map=LINGBOT_WEIGHT_MAP,
+    )
+    assert report.ok, report.errors
+    assert report.kind is CheckpointKind.PYTORCH
+    assert [w.code for w in report.warnings] == [FormatIssueCode.NESTED_TOO_DEEP]
+    assert "3 levels deep" in report.warnings[0].message
+
+
+def test_lifting_the_checkpoint_subdirectory_clears_the_warning() -> None:
+    """The remediation miners are told to apply has to actually work.
+
+    "Upload only ``checkpoints/global_step_N/hf_ckpt/``" is the sentence the CLI
+    prints; if that tree still warned, we would be sending people through a
+    25 GB re-upload for nothing.
+    """
+    lifted = [
+        {**e, "path": e["path"].removeprefix(f"{_HF_CKPT}/")}
+        for e in LINGBOT_POST_TRAINED_TREE
+        if e["path"].startswith(f"{_HF_CKPT}/")
+    ]
+    report = check_lingbot_layout(
+        _files(lifted), LINGBOT_LAYOUT_FIXTURE, weight_map=LINGBOT_WEIGHT_MAP
+    )
+    assert report.ok, report.errors
+    assert report.warnings == ()
+
+
+def test_requiring_the_cli_descriptor_contradicts_the_nesting_fix() -> None:
+    """Why ``LingbotLayout.cli_config_file`` stays off by default, made
+    executable.
+
+    In the published artifact the descriptor sits at the repo root while the
+    weights sit three levels below it. Turning the rule on accepts the layout
+    that warns, and rejects the layout we just told the miner to upload — two
+    instructions that cannot both be followed.
+    """
+    layout = LingbotLayout(
+        model_config_file=LINGBOT_MODEL_CONFIG_FILE,
+        weights_index_file=LINGBOT_WEIGHTS_INDEX_FILE,
+        camera_names=LINGBOT_LAYOUT_FIXTURE.camera_names,
+        joint_field_names=LINGBOT_LAYOUT_FIXTURE.joint_field_names,
+        cli_config_file="lingbotvla_cli.yaml",
+    )
+    assert _lingbot(LINGBOT_POST_TRAINED_TREE, layout=layout) == []
+    lifted = [
+        {**e, "path": e["path"].removeprefix(f"{_HF_CKPT}/")}
+        for e in LINGBOT_POST_TRAINED_TREE
+        if e["path"].startswith(f"{_HF_CKPT}/")
+    ]
+    assert _lingbot(lifted, layout=layout) == [FormatIssueCode.MISSING_CLI_CONFIG]
 
 
 def test_lingbot_tree_is_not_an_openpi_checkpoint() -> None:
@@ -658,18 +782,24 @@ def test_lingbot_fingerprint_survives_a_repo_rename() -> None:
 
 
 def test_golden_tree_count_is_pinned() -> None:
-    """Four module-level trees: three real openpi submissions and one vendor
-    reference checkpoint. Adding a fifth has to be a deliberate edit here."""
+    """Five module-level trees: three real openpi submissions, the vendor's
+    reference checkpoint, and the vendor's post-trained artifact. Adding a sixth
+    has to be a deliberate edit here."""
     trees = [
         v for k, v in globals().items() if k.endswith("_TREE") and isinstance(v, list)
     ]
-    assert len(trees) == 4
+    assert len(trees) == 5
 
 
-def test_lingbot_fixture_declares_its_source() -> None:
+def test_lingbot_fixtures_declare_their_source() -> None:
     """A fixture with no provenance only proves the code matches whoever wrote
-    it. Keep repo / revision / fetch date next to the tree."""
+    it. Keep repo / revision / date next to the tree — and for the post-trained
+    one, which inherits its byte sizes, say which half was observed."""
     source = Path(__file__).read_text(encoding="utf-8")
     header = source.split("LINGBOT_REFERENCE_TREE = _tree(")[0][-900:]
     for marker in ("repo=", "revision=", "fetched="):
         assert marker in header, marker
+
+    post_header = source.split("LINGBOT_POST_TRAINED_TREE = _tree(")[0][-1600:]
+    for marker in ("repo=", "published=", "listed=", "Provenance"):
+        assert marker in post_header, marker

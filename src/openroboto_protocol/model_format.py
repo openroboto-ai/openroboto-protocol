@@ -128,7 +128,20 @@ class FormatIssueCode(StrEnum):
 
     NESTED_TOO_DEEP = "nested_too_deep"
     """(warning) The checkpoint is nested deeper than the number of levels the
-    evaluator searches."""
+    evaluator searches.
+
+    🔴 **The most expensive warning in this file, and the one a miner is most
+    likely to hit by doing nothing wrong.** The vendor's own post-trained
+    artifact (``robbyant/lingbot-vla-v2-6b-robotwin``) keeps its weights under
+    ``checkpoints/global_step_50000/hf_ckpt/`` — three levels down, one past
+    :data:`MAX_CHECKPOINT_NESTING_DEPTH` — so a miner who uploads the training
+    output *as it comes out* is copying the published example. It passes
+    admission, the TAO is burned, the queue slot is taken, and the evaluator
+    then finds no weights. Failing at the last step costs more than being
+    rejected at the first, which is why a consumer that runs before payment
+    (the CLI's ``openroboto check``) should refuse to continue on this warning
+    rather than print it and move on.
+    """
 
     # ── Added in 0.7.0 for LingBot-VLA 2.0. Appended at the end on purpose: an
     #    enum member inserted in the middle changes no behaviour, but it makes
@@ -285,7 +298,14 @@ LFS pointers and no real weights."""
 
 MAX_CHECKPOINT_NESTING_DEPTH: Final = 2
 """The evaluator looks for the checkpoint only at three levels: the root,
-``*/``, and ``*/*/``. Buried deeper than that, it will not find it."""
+``*/``, and ``*/*/``. Buried deeper than that, it will not find it.
+
+⚠️ **The number is the evaluator's, not ours.** ``openroboto-evaluation`` is
+maintained by the evaluation side; raising this constant would only make the
+warning disappear, not make the weights findable. The one place it can be
+absorbed is before the miner pays — see
+:attr:`FormatIssueCode.NESTED_TOO_DEEP`.
+"""
 
 
 # ── LingBot-VLA 2.0 ────────────────────────────────────────────────────────
@@ -294,11 +314,32 @@ MAX_CHECKPOINT_NESTING_DEPTH: Final = 2
 # openpi rules above are what miners have been submitting against since round 1
 # and they are not touched.
 #
-# Every constant here was read off the vendor's published reference checkpoint
-# and training repo, not inferred:
+# Every constant here was read off the vendor's published checkpoints and
+# training repo, not inferred. **Two** checkpoints are referenced, because they
+# are laid out differently and only reading both shows it:
+#
 #   repo=robbyant/lingbot-vla-v2-6b revision=11c703bf6a5c1f45b3b69168482da11fdbba53d7
+#     The base model. Weights, config and tokenizer all sit at the repo root.
+#
+#   repo=robbyant/lingbot-vla-v2-6b-robotwin  published=2026-07-24
+#     The official **post-trained** artifact — the thing a miner is shown as an
+#     example of a finished model. Same file names, but three levels down under
+#     `checkpoints/global_step_50000/hf_ckpt/`, with `lingbotvla_cli.yaml` alone
+#     at the repo root. Full weights, not an adapter: the training entrypoint
+#     has no lora/peft path at all and runs `freeze_vision_encoder: false`
+#     under fsdp2.
+#
 #   code=github.com/Robbyant/lingbot-vla-v2@main   fetched=2026-08-25
-# Anything those two sources do not answer is deliberately left out rather than
+#
+# 🔴 Why the second one had to be added. These constants were first written
+# from the base model alone, and that repo hides the one divergence that costs
+# a miner money: the post-trained layout is nested one level deeper than
+# MAX_CHECKPOINT_NESTING_DEPTH, so uploading the training output unchanged
+# passes admission and *then* fails evaluation. "Read the reference checkpoint"
+# is not the same discipline as "read the artifact miners will actually copy".
+# Both trees are pinned in tests/test_model_golden_vectors.py.
+#
+# Anything these sources do not answer is deliberately left out rather than
 # guessed — a guessed rule rejects miners who have already burned TAO, which is
 # the exact shape of the 2026-08-14 incident (see REJECTED_PATH_SEGMENTS).
 
@@ -400,15 +441,24 @@ class LingbotLayout:
     weights (the base-model PRD §5 rule 1 calls it ``lingbotvla_cli.yaml``), or
     ``None`` when this competition does not require one.
 
-    🔴 **Defaults to ``None`` because the rule is unverified.** No file by that
-    name exists in the vendor's reference checkpoint
-    (``robbyant/lingbot-vla-v2-6b``), in ``robbyant/lingbot-vla-4b``, or anywhere
-    in the training repo, and the export path that writes the shards
-    (``lingbotvla.models.save_model_weights``) does not emit one. Requiring it by
-    default would therefore reject **every** LingBot submission, including the
-    vendor's own — the 2026-08-14 shape again. A competition that has confirmed
-    its own toolchain writes the file sets this field and gets
-    :attr:`FormatIssueCode.MISSING_CLI_CONFIG`; until then the rule stays off.
+    🔴 **Defaults to ``None`` because the vendor's own artifacts disagree.**
+    ``robbyant/lingbot-vla-v2-6b-robotwin``, the post-trained artifact, does
+    carry ``lingbotvla_cli.yaml`` at its repo root; the base model
+    ``robbyant/lingbot-vla-v2-6b``, ``robbyant/lingbot-vla-4b`` and the training
+    repo have no file by that name, and the export path that writes the shards
+    (``lingbotvla.models.save_model_weights``) does not emit one — so a miner who
+    exports weights and uploads them has no reason to possess it. Requiring it by
+    default would reject those miners after they burned — the 2026-08-14 shape
+    again. A competition that has confirmed its own toolchain writes the file
+    sets this field and gets :attr:`FormatIssueCode.MISSING_CLI_CONFIG`; until
+    then the rule stays off.
+
+    ⚠️ Turning it on has a second-order cost worth knowing before flipping it:
+    in the post-trained artifact the descriptor sits at the repo root while the
+    weights sit three levels below it, so the fix for
+    :attr:`FormatIssueCode.NESTED_TOO_DEEP` — upload only the checkpoint
+    subdirectory — leaves the descriptor behind. Requiring both at once tells
+    the miner to do two contradictory things.
     """
 
 
