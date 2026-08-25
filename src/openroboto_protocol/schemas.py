@@ -2083,7 +2083,15 @@ class MediaRef(Contract):
     #: in two spellings would compare unequal to itself.
     sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     #: Size in bytes, when the uploader knows it. `None` = unknown, **not 0**.
-    bytes_len: StrictInt | None = None
+    #: `gt=0` is what makes that sentence true rather than merely written down: an
+    #: empty object is not evidence, and the backend's presign request already
+    #: declares `bytes: Field(gt=0, le=MAX_EVIDENCE_BYTES)` for the same value
+    #: (`08-23-evidence-upload-hashing`), so 0 or a negative reaches it only to be
+    #: rejected one round-trip later — after the operator has already uploaded.
+    #: The **upper** bound stays on the backend: it is an ops setting
+    #: (`MAX_EVIDENCE_BYTES`), and freezing it here would mean releasing this
+    #: package to raise it — the same reason `episode_idx` has no upper bound.
+    bytes_len: Annotated[StrictInt, Field(gt=0)] | None = None
 
 
 class EpisodeResult(Contract):
@@ -2112,7 +2120,42 @@ class EpisodeResult(Contract):
     #: The operator's note on the verdict. For humans; clients must not branch on it.
     verdict_note: str | None = None
     #: Wall-clock length of the episode. `None` = not measured, **not 0**.
-    duration_sec: StrictFloat | None = None
+    #:
+    #: 🔴 **`ge=0` is on the field, not in a `check_episode_results()`** — the
+    #: opposite of the choice `EnvScore.score` / `EnvScore.samples` made two
+    #: sections up, and the difference between the two cases is which paths the
+    #: model serves:
+    #:
+    #: - `EnvScore` is **read back** as well: it is nested in `ScoreSubmission`,
+    #:   which is `SubmissionRecord.result` and `SubmissionHistoryItem.result`.
+    #:   A range constraint on it turns one dirty historical row (`score=99.0`
+    #:   really is in the production database) into a 500 on a read endpoint, so
+    #:   its range check has to live in a function that runs on the raw JSON of
+    #:   the write path only — that is what `check_env_scores()` is.
+    #: - `EpisodeResult` is a **request body and nothing else**: no response model
+    #:   nests it, and the table it feeds is new and empty, so there is no
+    #:   historical row for a constraint to blow up on. The narrower fix has no
+    #:   read path to damage.
+    #:
+    #: Given that, a `check_episode_results()` would be strictly worse: it only
+    #: guards the callers who remember to call it, and this endpoint's caller is
+    #: the operator client plus whatever the backend wires up next.
+    #: `worker_status_alias` in this same module is the standing demonstration —
+    #: a correct function that **nothing calls**. A field constraint has no
+    #: bypass and needs no wiring.
+    #:
+    #: What it is worth: the backend's episode table declares
+    #: `CHECK (duration_sec IS NULL OR duration_sec >= 0)`
+    #: (`08-23-real-episode-results-table`). Accepting -99.0 here means the
+    #: request is answered 200, the row is refused by the database, and the
+    #: operator sees a 500 for an episode that has already been run.
+    #: `allow_inf_nan=False` covers the two values the CHECK would **not** have
+    #: caught. In Postgres NaN sorts above every number, so `NaN >= 0` is true
+    #: there and `Infinity >= 0` is true anywhere — both satisfy the constraint
+    #: and get stored as a duration, and both make every average computed over
+    #: this column NaN or infinite from then on. Python's `json.dumps` emits
+    #: those literals by default, so a client reaches them without trying.
+    duration_sec: Annotated[StrictFloat, Field(ge=0, allow_inf_nan=False)] | None = None
     #: Required exactly when `success` is false — see the two invariants below.
     failure: EpisodeFailure | None = None
     #: The two recordings of the run (spec 10 §7.2). Written as two fields rather

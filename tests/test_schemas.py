@@ -1874,6 +1874,58 @@ def test_episode_idx_has_no_upper_bound() -> None:
     assert s.EpisodeResult(**{**_EPISODE_BASE, "episode_idx": 99}, success=True)
 
 
+@pytest.mark.parametrize(
+    "bad", [-99.0, -0.001, float("nan"), float("inf"), float("-inf")]
+)
+def test_episode_duration_rejects_anything_that_is_not_a_real_length(
+    bad: float,
+) -> None:
+    """The backend's episode table has
+    `CHECK (duration_sec IS NULL OR duration_sec >= 0)`. Without a bound here the
+    request is answered 200 and the row is then refused by the database — the
+    operator gets a 500 for an episode that has already been run, and the
+    recording it was supposed to file is not stored anywhere.
+
+    NaN and `inf` are in the list because the CHECK does **not** stop them:
+    Postgres sorts NaN above every number, so both satisfy `>= 0` there and get
+    stored as a duration, and every average over the column is poisoned from
+    then on."""
+    with pytest.raises(ValidationError):
+        s.EpisodeResult(**{**_EPISODE_BASE, "duration_sec": bad}, success=True)
+
+
+def test_episode_duration_accepts_zero_a_positive_value_and_none() -> None:
+    """0 is a legal measurement (an episode that ended the moment it started),
+    `None` means it was not measured, and both must stay representable — the
+    bound is `ge`, not `gt`, and it is not a default."""
+
+    def build(value: float | None) -> s.EpisodeResult:
+        return s.EpisodeResult(**{**_EPISODE_BASE, "duration_sec": value}, success=True)
+
+    assert build(0.0).duration_sec == 0.0
+    assert build(12.5).duration_sec == 12.5
+    assert build(None).duration_sec is None
+    assert s.EpisodeResult(**_EPISODE_BASE, success=True).duration_sec is None
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_media_ref_rejects_a_non_positive_size(bad: int) -> None:
+    """`None` = the uploader does not know; 0 = an empty object, which is not
+    evidence. The backend's presign request declares the same value as
+    `Field(gt=0, le=MAX_EVIDENCE_BYTES)`, so without this bound the mismatch is
+    found one round-trip later — after the upload."""
+    with pytest.raises(ValidationError):
+        s.MediaRef(uri="s3://x", sha256="a" * 64, bytes_len=bad)
+
+
+def test_media_ref_keeps_no_upper_bound_on_size() -> None:
+    """The ceiling is an ops setting (`MAX_EVIDENCE_BYTES`) and stays on the
+    backend: freezing it here would mean releasing this package to raise it, the
+    same reason `episode_idx` has no upper bound."""
+    assert s.MediaRef(uri="s3://x", sha256="a" * 64, bytes_len=10**12).bytes_len
+    assert s.MediaRef(uri="s3://x", sha256="a" * 64).bytes_len is None
+
+
 def test_episode_rejects_a_stringly_typed_success() -> None:
     """`success` is the score. In lax mode `"true"` would become `True`, which is
     the exact shape of the 2026-08-14 scoring incident."""
