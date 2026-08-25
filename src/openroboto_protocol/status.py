@@ -14,7 +14,8 @@ version number cannot disagree.
 **The two vocabularies are not the same thing, and mixing them is the incident itself**:
 
 - **status**: which step the submission has reached. The lifecycle status; for the
-  values see `ALL_STATUSES`.
+  values see `ALL_STATUSES` (every word this package knows) and
+  `STORABLE_STATUSES` (the subset a `status` column will accept).
 - **stage**: what the worker is doing after claiming the task. The progress detail; for
   the values see `ALL_STAGES`, meaningful only while status is `evaluating`.
 
@@ -25,7 +26,7 @@ side's word is judged illegal by that other side.
 The real track adds two more vocabularies at the bottom of this file — `SeasonStatus`
 (how far one season has got) and `InvalidReason` (why a submission was disqualified).
 It deliberately adds **no** submission status: real-track submissions live in the same
-table and use the same eight lifecycle words.
+table and use the same lifecycle words as everything else.
 
 ⚠️ What is discussed here is the **vocabulary**, not the field name carrying it, and
 certainly not the database column name. The response field carrying the lifecycle status
@@ -49,6 +50,11 @@ timeouts are judged. Those are the backend's business — and moreover the autho
 column is **the opposite** before and after the data migration (`eval_status` before,
 `status` after), so writing it into this package would make an unrecoverable version
 number promise something another repository can change at any time.
+
+The one storage fact that *is* here is `STORABLE_STATUSES`: "the word I am about to
+write will be refused by the column" is not an implementation detail, it is a fact both
+sides have to agree on before the write, and disagreeing about it costs a 500 rather
+than a validation error.
 """
 
 from __future__ import annotations
@@ -84,7 +90,9 @@ __all__ = [
     "STATUS_SEED_FAILED",
     "STATUS_SUPERSEDED",
     "STATUS_TRANSITIONS",
+    "STORABLE_STATUSES",
     "TERMINAL_STATUSES",
+    "TRANSIENT_STATUSES",
     "InvalidReason",
     "SeasonStatus",
     "Stage",
@@ -221,9 +229,60 @@ _TRANSITIONS: Final[dict[str, frozenset[str]]] = {
 #: Read-only; consumers must not modify it.
 STATUS_TRANSITIONS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(_TRANSITIONS)
 
-#: Every legal status. **Same source as the transition table** (it is exactly its key
-#: set), so "in the table but not in the vocabulary" cannot happen.
+#: Every status word this package knows. **Same source as the transition table** (it is
+#: exactly its key set), so "in the table but not in the vocabulary" cannot happen.
+#:
+#: This is the vocabulary for **reading**: deciding whether a word that arrived from
+#: somewhere is legal, running the state machine, judging a historical row. Before
+#: **writing** a status, use `STORABLE_STATUSES` — this set is deliberately larger.
 ALL_STATUSES: Final[frozenset[str]] = frozenset(STATUS_TRANSITIONS)
+
+#: The subset a submission's status column will actually accept — the vocabulary for
+#: **writing**.
+#:
+#: Word for word the whitelist of `ck_submissions_status`
+#: (`openroboto-backend/app/alembic/versions/0001_target_schema.sql`). A word outside it
+#: does not fail validation, it violates the CHECK at INSERT time — i.e. a 500 after the
+#: request was already accepted. Which is exactly what a consumer that checks a
+#: to-be-written status against `ALL_STATUSES` will produce, because `ALL_STATUSES` says
+#: yes to two words no column holds.
+#:
+#: 🔴 **Written out rather than derived from `TRANSIENT_STATUSES`**, so that the default
+#: for a newly added status is "not storable": forgetting to list a new word here makes
+#: the write fail *before* it reaches the database, while deriving it would make the new
+#: word silently storable and move the failure to the CHECK. Fail closed on the side
+#: that produces a diagnosable error.
+#:
+#: ⚠️ Today this is still a copy of a hand-written constraint, kept honest by
+#: `tests/test_status.py`. It stops being a copy when the backend deletes its own
+#: `SUBMISSION_STATUSES` and imports this one (`AGENTS.md` §1②, the 1.0 checklist).
+STORABLE_STATUSES: Final[frozenset[str]] = frozenset(
+    {
+        STATUS_RECEIVED,
+        STATUS_PENDING,
+        STATUS_SEED_FAILED,
+        STATUS_EVALUATING,
+        STATUS_EVALUATED,
+        STATUS_EVAL_FAILED,
+        STATUS_REJECTED,
+        STATUS_SUPERSEDED,
+    }
+)
+
+#: In the vocabulary, never in the column: `burn_checking` and `burn_passed`.
+#:
+#: They name the two steps of the burn check, and the backend records **that** check in
+#: a separate `burn_status` column, so the lifecycle column goes straight from
+#: `received` to `pending` / `seed_failed` and never holds either word. They stay in the
+#: vocabulary because they are real: the chain scanner passes through both
+#: (`verify_submission.py:560` / `:569`), the public API reference documents both, and
+#: `received → burn_checking → burn_passed → pending` is the honest shape of the scan.
+#: Dropping them would make `can_transition` call the scanner's own steps illegal, and
+#: would make old rows and old docs unreadable — which is the failure this package
+#: exists to prevent, pointed the other way.
+#:
+#: Derived, so the two sets above cannot disagree about what the difference is.
+TRANSIENT_STATUSES: Final[frozenset[str]] = ALL_STATUSES - STORABLE_STATUSES
 
 
 def is_terminal(status: str) -> bool:
@@ -406,11 +465,11 @@ def normalize_status(status: str) -> str:
 #
 # 🔴 **Neither of these is a submission status.** Real-track submissions live in
 # the same `submissions` table as simulation ones, told apart by
-# `competition_id`, so they share the same `status` column and the same eight
-# words above. "Only one vocabulary in the database" applies to the real track
-# word for word; this module does not invent a second one.
+# `competition_id`, so they share the same `status` column and the same words
+# above. "Only one vocabulary in the database" applies to the real track word for
+# word; this module does not invent a second one.
 #
-# How the real track's own wording (spec 10 §2.5) lands on those eight words:
+# How the real track's own wording (spec 10 §2.5) lands on those words:
 #
 #     registered / awaiting evaluation  → received
 #     evaluating                        → evaluating
@@ -450,14 +509,40 @@ class SeasonStatus(StrEnum):
     """Every entry has been evaluated; the ranking and the qualification
     threshold have not been settled yet (spec 10 §4.3)."""
 
-    PAYING_OUT = "paying_out"
-    """Settled, and the payout plans exist but have not all been executed. It is
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    """The settlement record exists — ranking, threshold, champion, qualified and
+    disqualified lists are all written down — and **no α has moved yet**. Leaving
+    this word is a human decision, and it is the last reversible moment of the
+    season: the next word starts a daily transfer that cannot be recalled.
+
+    Not one of the five words in the PRD. `openroboto-backend` added it (cooling
+    period plus a manual gate, `.trellis/tasks/08-23-finalize-command`) and this
+    package follows, because a state that exists in the code but not in the
+    vocabulary has to be squeezed into a word that means something else — either
+    `awaiting_settlement`, which is false the moment the record is written, or
+    `paying`, which claims money is moving while a human is still deciding. The
+    PRD listing five words was a description, not a budget.
+    """
+
+    PAYING = "paying"
+    """Confirmed, and the payout plans exist but have not all been executed. It is
     the only word during which money is in flight, so a crash here is resumed
-    from, not restarted (spec 10 §4.3)."""
+    from, not restarted (spec 10 §4.3).
+
+    **Spelled `paying`, not `paying_out`**, and the tie-break is which spelling is
+    harder to misread, not which repository wrote it first. The neighbouring word
+    is `paid_out`: against it, `paying_out` is a near-anagram sharing the `_out`
+    suffix and differing in the middle of the string, while the two words mean
+    "α is leaving the wallet every day" and "the season is closed, nothing more
+    will move". A pair that a tired reader, a `grep pay`, or an eye running down a
+    status column can swap is the wrong pair when the difference is whether money
+    is still in flight. `paying` / `paid_out` cannot be confused at a glance.
+    (`openroboto-backend`'s task docs had already written `paying` in 20-odd
+    places — that made the decision cheap, it is not what made it right.)
+    """
 
     PAID_OUT = "paid_out"
-    """Both payout plans have been executed in full. Terminal (spec 10
-    §4.3)."""
+    """Every payout plan has been executed in full. Terminal (spec 10 §4.3)."""
 
     BURNED = "burned"
     """Nobody met the qualification threshold, so the whole prize pool was
@@ -508,11 +593,31 @@ class InvalidReason(StrEnum):
 
 
 #: The value tuple of `SeasonStatus`, in the order a season passes through it.
-#: A backend migration builds its CHECK constraint straight from this, so
-#: "in the enum but not in the constraint" cannot happen.
+#:
+#: ⚠️ **Nothing enforces that a database agrees with this tuple.** `ck_settlement_status`
+#: in `openroboto-backend` is a hand-typed word list, and hand-typing it is exactly how
+#: `paying_out` and `paying` became two spellings of one state before either had been
+#: run once. The order is part of the export so that a migration can stop typing them::
+#:
+#:     from openroboto_protocol.status import SEASON_STATUS_VALUES
+#:
+#:     words = ", ".join(f"'{v}'" for v in SEASON_STATUS_VALUES)
+#:     op.execute(
+#:         "ALTER TABLE season_settlements ADD CONSTRAINT ck_settlement_status "
+#:         f"CHECK (status IN ({words}))"
+#:     )
+#:
+#: That buys "the constraint was right on the day it was written" and no more — a
+#: migration is frozen history, so a later release of this package can move the tuple
+#: out from under a constraint that has already run. The part that keeps tracking has to
+#: live on the consumer's side: a test that reads the constraint back out of
+#: `pg_constraint` and compares it with this tuple. Until that test exists, agreement
+#: here is a convention, not a guarantee, and this comment says so rather than
+#: reassuring anyone.
 SEASON_STATUS_VALUES: Final[tuple[str, ...]] = tuple(s.value for s in SeasonStatus)
 
-#: The value tuple of `InvalidReason`. Same use, same reason.
-#: It is exactly the word list of `ck_submissions_invalid_reason` in the
-#: backend's 0004 migration.
+#: The value tuple of `InvalidReason`. Same use — and the same caveat as above: it
+#: matches the word list of `ck_submissions_invalid_reason` in the backend's 0004
+#: migration today because both were typed from spec 10 §2.5, not because anything
+#: compares them.
 INVALID_REASON_VALUES: Final[tuple[str, ...]] = tuple(r.value for r in InvalidReason)

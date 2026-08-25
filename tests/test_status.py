@@ -22,6 +22,72 @@ def test_all_statuses_is_the_transition_table_keys() -> None:
     assert S.ALL_STATUSES == set(S.STATUS_TRANSITIONS)
 
 
+def test_the_vocabulary_is_larger_than_what_a_column_accepts() -> None:
+    """Ten words are legal to *read*, eight are legal to *write* — and the two
+    numbers are pinned here because prose that carried them got them wrong (this
+    module's docstring said "eight" for both while `ALL_STATUSES` held ten, and
+    nothing was watching).
+
+    The gap is the whole reason the two names exist: a consumer that validates a
+    to-be-written status against `ALL_STATUSES` passes `burn_checking`, and the
+    INSERT then violates `ck_submissions_status` — a 500 after the request was
+    accepted, not a rejection the caller can act on.
+    """
+    assert len(S.ALL_STATUSES) == 10
+    assert len(S.STORABLE_STATUSES) == 8
+    assert S.STORABLE_STATUSES < S.ALL_STATUSES
+
+
+def test_storable_statuses_are_the_check_constraint_word_for_word() -> None:
+    """The whitelist of `ck_submissions_status` in the backend's
+    `0001_target_schema.sql`, copied verbatim. When the backend deletes its own
+    `SUBMISSION_STATUSES` and imports this set, this test is what the deletion
+    rests on.
+    """
+    assert S.STORABLE_STATUSES == {
+        "received",
+        "pending",
+        "evaluating",
+        "evaluated",
+        "eval_failed",
+        "rejected",
+        "seed_failed",
+        "superseded",
+    }
+
+
+def test_the_two_transient_statuses_are_the_only_difference() -> None:
+    """`burn_checking` / `burn_passed` name the two steps of the burn check, and
+    the backend records that check in a separate `burn_status` column — so the
+    lifecycle column goes `received` → `pending` / `seed_failed` and never holds
+    either word.
+
+    They stay in the vocabulary because the scanner really does pass through them
+    (`verify_submission.py:560` / `:569`) and the public API reference documents
+    both: deleting them would make `can_transition` call the scanner's own steps
+    illegal. Legal to read, never legal to write — which is exactly what having
+    two sets says.
+    """
+    assert S.TRANSIENT_STATUSES == {"burn_checking", "burn_passed"}
+    assert S.TRANSIENT_STATUSES & S.STORABLE_STATUSES == set()
+    # Real steps, not orphan words: both sit on the path out of `received`.
+    assert S.can_transition(S.STATUS_RECEIVED, S.STATUS_BURN_CHECKING)
+    assert S.can_transition(S.STATUS_BURN_CHECKING, S.STATUS_BURN_PASSED)
+
+
+def test_every_terminal_status_can_be_stored() -> None:
+    """Where a submission comes to rest is where it stays in the table. A terminal
+    word that no column accepts would leave finished rows with nothing to be."""
+    assert S.TERMINAL_STATUSES <= S.STORABLE_STATUSES
+
+
+def test_normalizing_an_old_word_yields_a_storable_one() -> None:
+    """Reading old data is only half of it — the normalized word gets written back.
+    Every target of the alias table must therefore be storable, not merely legal."""
+    for old, new in S.LEGACY_STATUS_ALIASES.items():
+        assert new in S.STORABLE_STATUSES, old
+
+
 def test_transition_targets_are_all_known_statuses() -> None:
     """The transition table must not point at a status outside the vocabulary (a
     single mistyped letter shows up right here)."""
@@ -332,17 +398,28 @@ def test_legacy_alias_table_is_read_only() -> None:
 
 
 def test_season_status_values_are_pinned() -> None:
-    """Word for word, in the order a season passes through them. A backend
-    migration builds its CHECK constraint from this tuple, so losing one word
-    here silently makes a legal state unstorable."""
+    """Word for word, in the order a season passes through them.
+
+    `awaiting_confirmation` is not in the PRD's five words. It is the cooling
+    period plus the manual gate — the settlement record is written and no α has
+    moved — and it is here because `openroboto-backend` needs the state and the
+    only alternative is to overload a word that means something else.
+
+    The word is `paying`, **not** `paying_out`: `paying_out` and `paid_out` share
+    the `_out` suffix and differ in the middle, and they mean "money is leaving
+    the wallet daily" versus "the season is closed". Two states that must never be
+    mistaken for each other do not get near-identical spellings.
+    """
     assert S.SEASON_STATUS_VALUES == (
         "awaiting_eval",
         "awaiting_settlement",
-        "paying_out",
+        "awaiting_confirmation",
+        "paying",
         "paid_out",
         "burned",
     )
     assert S.SEASON_STATUS_VALUES == tuple(s.value for s in S.SeasonStatus)
+    assert "paying_out" not in S.SEASON_STATUS_VALUES
 
 
 def test_invalid_reason_values_are_pinned() -> None:
@@ -362,8 +439,8 @@ def test_invalid_reason_values_are_pinned() -> None:
 
 def test_the_real_track_adds_no_submission_status() -> None:
     """🔴 Real-track submissions live in the same `submissions` table, keyed by
-    `competition_id`, so they use the same eight lifecycle words. Two
-    vocabularies on one column is the 2026-08-14 incident itself.
+    `competition_id`, so they use the same lifecycle words as everything else.
+    Two vocabularies on one column is the 2026-08-14 incident itself.
 
     `registered` and `invalid` were considered and dropped: they map onto
     `received` and `rejected` (plus an `InvalidReason`).
@@ -422,7 +499,9 @@ def test_module_exports_are_pinned() -> None:
         "STATUS_SEED_FAILED",
         "STATUS_SUPERSEDED",
         "STATUS_TRANSITIONS",
+        "STORABLE_STATUSES",
         "TERMINAL_STATUSES",
+        "TRANSIENT_STATUSES",
         "InvalidReason",
         "SeasonStatus",
         "Stage",

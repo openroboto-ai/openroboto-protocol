@@ -57,15 +57,34 @@ Added, all optional, all with a defined meaning for data that predates them:
   season lookup fails loudly instead of quietly filing a real-track entry on the
   simulation leaderboard with the fee already paid.
 - **`status`**: `SeasonStatus` (`awaiting_eval`, `awaiting_settlement`,
-  `paying_out`, `paid_out`, `burned`) and `InvalidReason` (`hf_forbidden`,
-  `hf_access_revoked`, `hf_repo_not_found`, `hf_revision_not_found`,
-  `hf_files_incomplete`), each with a `*_VALUES` tuple so a `CHECK` constraint can
-  be built from the package instead of from a hand-typed literal.
-  `INVALID_REASON_VALUES` is exactly the word list already in the backend's 0004
-  migration. **No new submission status**: real-track submissions live in the same
-  table keyed by `competition_id` and share the same eight lifecycle words —
-  `registered` maps to `received`, `disqualified` to `rejected` plus a reason
-  code. Two vocabularies on one column is the 2026-08-14 incident itself.
+  `awaiting_confirmation`, `paying`, `paid_out`, `burned`) and `InvalidReason`
+  (`hf_forbidden`, `hf_access_revoked`, `hf_repo_not_found`,
+  `hf_revision_not_found`, `hf_files_incomplete`), each with a `*_VALUES` tuple so a
+  `CHECK` constraint can be built from the package instead of from a hand-typed
+  literal. `INVALID_REASON_VALUES` is exactly the word list already in the backend's
+  0004 migration. **No new submission status**: real-track submissions live in the
+  same table keyed by `competition_id` and share the lifecycle words that were
+  already there — `registered` maps to `received`, `disqualified` to `rejected` plus
+  a reason code. Two vocabularies on one column is the 2026-08-14 incident itself.
+
+  Two of the season words are worth reading before you build a table on them.
+  `awaiting_confirmation` is **not** in the PRD's five: it is the cooling period
+  plus the manual gate — settlement written, no α moved — and the alternative to
+  naming it is overloading a word that means something else. And the word is
+  `paying`, **not** `paying_out`: `paying_out` and `paid_out` share a suffix and
+  differ in the middle, while meaning "α leaves the wallet daily" versus "the season
+  is closed". Nothing that must never be confused gets a near-identical spelling.
+
+- **`status`**: `STORABLE_STATUSES` (8 words) and `TRANSIENT_STATUSES`
+  (`burn_checking`, `burn_passed`) split what had been one set doing two jobs.
+  `ALL_STATUSES` (10 words, unchanged) is the vocabulary for **reading** — is this
+  word legal, does this transition hold. `STORABLE_STATUSES` is the vocabulary for
+  **writing**, word for word the `ck_submissions_status` whitelist. Validating a
+  to-be-written status against `ALL_STATUSES` passes two words the column refuses,
+  and the CHECK violation surfaces as a 500 after the request was accepted, so a
+  write-side check should move to the new set. Both sizes and the difference between
+  them are now pinned by tests; the module's own docstring had been claiming
+  "eight" for a set of ten, with nothing watching.
 - **`schemas`**: `Competition` — the body of `GET /api/v1/competitions`, one season
   and the spec frozen for it (backend `competitions`, ADR 03). It reuses
   `commitment.Track` instead of spelling `sim` / `real` a second time, and lists
