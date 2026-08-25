@@ -52,6 +52,7 @@ copy-paste away from happening.
 | `model_hash.py` | Model fingerprinting | Both compute it; a mismatch rejects a submission |
 | `model_format.py` | What a submittable checkpoint must contain | Miners export to it, the evaluator rejects against it |
 | `status.py` | Task status and stage vocabulary | Backend, worker and frontend all render it |
+| `weights.py` | `{hotkey: share}` → `(uid, u16)`, the last conversion before emissions go on chain | Backend writes them, an external validator recomputes them |
 | `schemas.py` | Request / response models for every API endpoint | Backend serves them, worker and CLI consume them |
 | `constants.py` | `CHAMPION_MARGIN`, `REQUIRED_ENVS`, … | Ranking and admission both read them |
 
@@ -82,12 +83,13 @@ The version number *is* the contract version.
 >
 > This is deliberate, and it ends on a specific event, not on a date:
 > **`openroboto-backend` and `openroboto-cli` have not picked their launch
-> versions yet.** Neither of them can even install this package today — the
-> backend still carries three hand-copied mirrors (`app/domain/worker_reports.py`,
-> `app/domain/reasons.py`, the copied block in `app/api/envelope.py`), which is
-> the very drift this package exists to end. Freezing a contract that has never
-> been consumed would freeze whatever shape it happens to have, not the shape
-> integration proves it needs.
+> versions yet.** Both install and import this package today, but neither has
+> locked the version it goes live with, and the backend still carries three
+> hand-copied mirrors
+> (`app/domain/worker_reports.py`, `app/domain/reasons.py`, the copied block in
+> `app/api/envelope.py`) — the very drift this package exists to end. Freezing a
+> contract before that would freeze whatever shape it happens to have, not the
+> shape integration proves it needs.
 >
 > **`1.0.0` ships when backend and CLI lock their launch versions against it.**
 > From that release on, the table below is binding and going back to `0.x`
@@ -101,6 +103,11 @@ The version number *is* the contract version.
 
 Consumers pin an exact version (`openroboto-protocol==0.7.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
+
+[`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
+records what each version changed **and who has to act on it** — a pinned consumer
+only moves deliberately, so "does this release require anything of me" is the
+question it has to answer first.
 
 ## What consumers must add to their own CI
 
@@ -210,8 +217,13 @@ has a `[tool.uv.sources]` entry plus its own comments — six lines total that m
 failed on both repositories for reasons that had nothing to do with pinning.
 
 Ceilings, both deliberate. A `[tool.uv.sources]` path or git override is **not**
-flagged: `openroboto-cli` currently needs one because this package is not published,
-and the pin still applies on top of it. And the check reads `pyproject.toml` and
+flagged, and that is the sharp edge: the override **bypasses the version
+constraint**, so a repository can declare `==1.0.0`, resolve to something else and
+still print `pin ok`. `openroboto-cli` used to carry one and has deleted it now
+that this package is on PyPI; do not add it back to develop against unreleased
+changes — use `uv pip install -e ../openroboto-protocol` for that session instead,
+where it is at least visible and does not stay in the repository to fool the next
+person. And the check reads `pyproject.toml` and
 `requirements*.txt` only — a `constraints.txt` or a `Dockerfile` `pip install` line
 slips through. Add the file to the loop if a repository grows one.
 
