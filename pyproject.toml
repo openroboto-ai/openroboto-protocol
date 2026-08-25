@@ -87,9 +87,13 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "T20", "RUF"]
-# 本仓的注释与 docstring 按约定写中文，中文标点（，。：；）会被 RUF001-003 当成
-# "和 ASCII 长得像的可疑字符"逐个报出来。规则本身是防同形字攻击的，对中文文档是纯噪音。
-# 只关这三条，RUF 其余规则保持开启。
+# Comments and docstrings in this repo are English (AGENTS.md §4 — it is a public
+# package, its readers are not on the team). What is left in CJK is deliberate test
+# data and quoted incident material: the round-trip case in tests/test_commitment.py
+# encodes a non-ASCII repo id on purpose, and tests/test_schemas.py quotes the
+# 2026-08-14 incident wording. CJK punctuation trips RUF001-003, which exist to catch
+# homoglyph attacks and are pure noise here. Only those three are off; the rest of RUF
+# stays on.
 ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]

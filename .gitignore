@@ -18,3 +18,11 @@ htmlcov/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+
+# ── Trellis / Claude Code local workflow ─────────────────
+# Runtime state of internal dev tooling: task queues, session journals, agent
+# scratch. It is machine-local and changes on every run, so it is not history.
+# The conventions themselves stay tracked in AGENTS.md / CLAUDE.md, which are
+# what a reader of this repo actually needs.
+.trellis/
+.claude/

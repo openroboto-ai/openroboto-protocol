@@ -94,7 +94,7 @@ dependencies = []   # 保持这样
 >   （cli 的 `burn_block_window`「等 0.3.0 发布」）**0.3.0 第二天就发了而没人回头看**。
 >
 > - [ ] **每个模块声明 `__all__`，并有一条测试钉住这张表。**
->   今天只有 `schemas.py` 有（72 项），`constants` / `status` / `seed` /
+>   今天只有 `schemas.py`（72 项）和 `weights.py`（3 项）有，`constants` / `status` / `seed` /
 >   `model_hash` / `model_format` / `commitment` **6 个模块一个都没有**。
 >   SemVer 承诺的对象是"公开表面"。表面没有定义，`patch`（行为不变）和
 >   `major`（破坏性）之间就没有判据 —— 删掉 `status.py` 里一个没人知道算不算
@@ -123,7 +123,7 @@ from openroboto_protocol import derive_seed  # ❌ 顶层没有这个名字
 实测：`import openroboto_protocol` 0.24 ms，`openroboto_protocol.schemas` 74 ms。
 两仓今天 24 条真实 import 全是子模块形状，**从顶层拿符号的 0 条** —— 迁移成本为零。
 
-消费方钉死精确版本（`openroboto-protocol==0.3.0`）。浮动版本和本地 vendored 副本
+消费方钉死精确版本（`openroboto-protocol==0.6.0`，以 README 为准）。浮动版本和本地 vendored 副本
 都由消费方 CI 拒绝（两条检查的原文在 README「What consumers must add to their own CI」，
 已经跑在 `openroboto-backend` 和 `openroboto-cli` 上）。
 
@@ -166,6 +166,7 @@ src/openroboto_protocol/
 ├── model_hash.py     模型指纹
 ├── model_format.py   可提交的 checkpoint 必须长什么样
 ├── status.py         任务状态 + 阶段词表
+├── weights.py        share → u16 归一化，上链排放前的最后一步
 ├── schemas.py        每个 API 端点的请求/响应模型
 ├── constants.py      CHAMPION_MARGIN、REQUIRED_ENVS…
 └── py.typed          标记为带类型的包，消费方 mypy 才认
@@ -213,8 +214,6 @@ git tag v1.0.1 && git push origin v1.0.1     发布的唯一动作
     不超过 72 字符；body 讲**为什么**不是复述 diff。
     可以引用中文文件名和中文标题（`docs/specs/07-worker契约组行为契约.md`），
     那是标识符不是叙述。
-  - 格式沿用 Conventional Commits：`type(scope): summary`。summary 用祈使句、不超过
-    72 字符；body 讲**为什么**不是复述 diff。
 - 导出的函数、常量、dataclass、schema 必须有注释，说明**契约含义**而不是复述名字
   （`status` 的状态机语义、`CHAMPION_MARGIN` 是绝对值不是百分比）。
 - 一组必须同源的字段绑成 `frozen=True` dataclass，让错配在类型层就不可能发生。
