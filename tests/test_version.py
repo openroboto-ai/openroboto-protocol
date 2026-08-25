@@ -23,7 +23,16 @@ from pathlib import Path
 
 import pytest
 
-README = Path(__file__).resolve().parents[1] / "README.md"
+ROOT = Path(__file__).resolve().parents[1]
+README = ROOT / "README.md"
+
+# The two files that quote the pin example in prose rather than offering it to be
+# copied. They drift silently, and they have: 915fc38 had to correct an AGENTS.md
+# example that had been left three versions behind, and `pyproject.toml` still
+# named 0.2.0 while the package was 0.7.0 — while its own comment claimed this
+# test was already guarding both. A stale example is how a consumer ends up
+# pinning a version that is no longer the contract.
+_QUOTED_PIN_FILES = ("AGENTS.md", "pyproject.toml")
 
 # Matches `openroboto-protocol==1.0.0`, and the form with an extra,
 # `openroboto-protocol[schemas]==1.0.0`. The version segment is required to start
@@ -43,6 +52,21 @@ def test_readme_pins_match_the_installed_version() -> None:
     assert set(pins) == {version("openroboto-protocol")}, (
         f"README pins {sorted(set(pins))} but the package version is "
         f"{version('openroboto-protocol')}"
+    )
+
+
+@pytest.mark.parametrize("name", _QUOTED_PIN_FILES)
+def test_quoted_pin_examples_do_not_drift(name: str) -> None:
+    """A pin example quoted anywhere in the repository must be this version.
+
+    Unlike the README's, these are not required to exist — the check is on the
+    ones that are there, not on their presence.
+    """
+    installed = version("openroboto-protocol")
+    pins = set(_PIN.findall((ROOT / name).read_text(encoding="utf-8")))
+    assert pins <= {installed}, (
+        f"{name} quotes {sorted(pins - {installed})} but the package version is "
+        f"{installed}"
     )
 
 

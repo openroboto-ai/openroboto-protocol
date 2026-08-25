@@ -1,8 +1,10 @@
 [project]
 name = "openroboto-protocol"
 # 版本号**就是**契约版本（README「Versioning is a promise」），消费方钉死的是精确
-# 版本：`openroboto-protocol==0.2.0`。README 和 AGENTS.md 必须同步改 ——
-# `tests/test_version.py` 双向守着（钉版一致 + 0.x 必须写明「不承诺兼容」）。
+# 版本：`openroboto-protocol==0.7.0`。README 和 AGENTS.md 必须同步改 ——
+# `tests/test_version.py` 双向守着（钉版一致 + 0.x 必须写明「不承诺兼容」）：
+# `test_quoted_pin_examples_do_not_drift` 把这一行也扫进去了，所以这个例子
+# 不会再像 0.2.0 那样被落下五个版本。
 #
 # **停在 0.x 是裁决，不是拖延**：backend 和 cli 都还没钉上线版本，也还没真正
 # import 过这个包，冻结版本号只会冻住它碰巧长成的形状。1.0.0 的四条前置条件
@@ -44,6 +46,9 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/openroboto-ai/openroboto-protocol"
 Issues = "https://github.com/openroboto-ai/openroboto-protocol/issues"
+# 消费方钉的是精确版本，所以「这一版要不要我动手」是他们最先问的问题。
+# CHANGELOG 不进包（sdist/wheel 只带 README），PyPI 侧边栏这条链接是它唯一的入口。
+Changelog = "https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md"
 
 # `schemas.py` 是唯一需要 pydantic 的模块，走 optional-dependency，主
 # `dependencies` 保持空。
