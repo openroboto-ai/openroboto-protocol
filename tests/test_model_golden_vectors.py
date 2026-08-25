@@ -37,17 +37,36 @@ be red forever.
 All three trees passed production admission and entered the evaluation queue, so
 there is only one possible meaning when a layout case goes red: the new rule
 would reject real miners, and must not ship.
+
+The fourth tree is of a different kind
+--------------------------------------
+``LINGBOT_REFERENCE_TREE`` is **not** a production submission — no LingBot-VLA
+round has run yet, and by the time one has, the rules that would have to be
+right on day one are already shipped. It is the vendor's published reference
+checkpoint, which is the only real LingBot tree that exists today. It carries no
+expected ``model_hash``: no on-chain fingerprint for it exists, and inventing
+one would be the opposite of what a golden vector is.
+
+What the LingBot cases pin is **mutual exclusion**: the openpi rules keep
+accepting the three real openpi repos, and neither set of rules accepts the
+other side's tree. Losing the first half means every existing miner is rejected
+on the day the new base model ships.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from openroboto_protocol.model_format import (
+    LINGBOT_MODEL_CONFIG_FILE,
+    LINGBOT_WEIGHTS_INDEX_FILE,
     CheckpointFile,
     CheckpointKind,
     FormatIssueCode,
+    LingbotLayout,
     check_checkpoint_layout,
+    check_lingbot_layout,
 )
 from openroboto_protocol.model_hash import model_hash_from_hf_tree
 
@@ -305,3 +324,352 @@ def test_real_repo_without_norm_stats_is_rejected() -> None:
     report = check_checkpoint_layout(stripped)
     assert not report.ok
     assert [i.code for i in report.errors] == [FormatIssueCode.MISSING_NORM_STATS]
+
+
+# ── LingBot-VLA 2.0: the vendor's reference checkpoint ────────────────────
+#
+# Fetched from
+# https://huggingface.co/api/models/robbyant/lingbot-vla-v2-6b/tree/<rev>?recursive=true
+# repo=robbyant/lingbot-vla-v2-6b
+# revision=11c703bf6a5c1f45b3b69168482da11fdbba53d7
+# fetched=2026-08-25
+#
+# Kept in the same shape as the three trees above so the same ``_tree`` /
+# ``_files`` helpers apply. Note what this tree does **not** contain: no
+# ``lingbotvla_cli.yaml`` (see LingbotLayout.cli_config_file) and no
+# ``norm_stats.json`` anywhere.
+LINGBOT_REFERENCE_TREE = _tree(
+    ("directory", 0, "assets"),
+    ("directory", 0, "depth"),
+    ("directory", 0, "dino_video"),
+    ("file", 1797, ".gitattributes"),
+    ("file", 2227, "README.md"),
+    ("file", 707, "added_tokens.json"),
+    (
+        "file",
+        1178043,
+        "assets/lingbot_vla2_framework.png",
+        "1dbbf05745216032dad897f6f5e59d02153325e1d39cfc01329b85e2ea2e41e7",
+    ),
+    (
+        "file",
+        445663,
+        "assets/lingbot_vla2_loss_mse_comparison.png",
+        "95108dee5d57842d18be27bf92424123b823449567f3d60cefbbac59379ffedd",
+    ),
+    (
+        "file",
+        2317830,
+        "assets/lingbot_vla2_vis_distillation.png",
+        "40ce6810ea47ab944de030551efd7753fb2ed84bd7477d3668ba0fab84c3277e",
+    ),
+    ("file", 31, "config.json"),
+    (
+        "file",
+        1316220456,
+        "depth/model.pt",
+        "d70c5191eab853d436763b35d40ff99d13534b4bcd43e4d02823656968159e5b",
+    ),
+    ("file", 1388, "dino_video/config.yaml"),
+    (
+        "file",
+        1401509792,
+        "dino_video/teacher_step_10000.pth",
+        "086285efd8d65bc66e96b363807c4010ee5c790b7452b765edaa23837a63705b",
+    ),
+    (
+        "file",
+        4987151072,
+        "model-00001-of-00006.safetensors",
+        "4afb52b06a13df8b738a156ae5c8196d3bfe6b3ca931cecbd701e44cb9674e45",
+    ),
+    (
+        "file",
+        4985113408,
+        "model-00002-of-00006.safetensors",
+        "ec131afa26a340db94c0dba8ec00e990be5f3d842ce6532070f0c8e26a067501",
+    ),
+    (
+        "file",
+        4928593216,
+        "model-00003-of-00006.safetensors",
+        "7dccb068ca66c11fa514476d64661eeead56e2e80e1c0572c9ea82aa0d9ecf27",
+    ),
+    (
+        "file",
+        4990740540,
+        "model-00004-of-00006.safetensors",
+        "1c2cb78066b69ae11255db851df95071e2cd69a3a4bc5020b3fd3b13b17819fb",
+    ),
+    (
+        "file",
+        4990095864,
+        "model-00005-of-00006.safetensors",
+        "8fe36bf1f4f617869954bdfa1ad12e16abd8b0235a5fa99c88d571d4cddf4a17",
+    ),
+    (
+        "file",
+        622195024,
+        "model-00006-of-00006.safetensors",
+        "3cf613d592dad64b1e2a1b1bb34a6f556a7fa05eacdb9972d73e0ea4882555a0",
+    ),
+    ("file", 207389, "model.safetensors.index.json"),
+    ("file", 782, "preprocessor_config.json"),
+    ("file", 613, "special_tokens_map.json"),
+    (
+        "file",
+        11422654,
+        "tokenizer.json",
+        "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+    ),
+    ("file", 5472, "tokenizer_config.json"),
+    ("file", 817, "video_preprocessor_config.json"),
+    ("file", 2776833, "vocab.json"),
+)
+
+#: The six shard names of ``LINGBOT_REFERENCE_TREE``, and one real tensor name
+#: per required prefix, copied out of the ``weight_map`` of that revision's
+#: ``model.safetensors.index.json`` (1708 tensors in total; the whole map is not
+#: needed to exercise the rules, and pasting 1708 lines would hide them).
+LINGBOT_WEIGHT_MAP = {
+    "model.action_in_proj.weight": "model-00006-of-00006.safetensors",
+    "model.action_out_proj.weight": "model-00006-of-00006.safetensors",
+    "model.state_proj.weight": "model-00006-of-00006.safetensors",
+    "model.qwenvl_with_expert.qwen_expert.model.norm.weight": (
+        "model-00006-of-00006.safetensors"
+    ),
+    "model.qwenvl_with_expert.qwenvl.model.visual.pos_embed.weight": (
+        "model-00001-of-00006.safetensors"
+    ),
+    **{
+        f"model.qwenvl_with_expert.qwenvl.model.language_model.layers.{i}."
+        "self_attn.q_proj.weight": f"model-0000{i + 1}-of-00006.safetensors"
+        for i in range(5)
+    },
+}
+
+#: What a competition row would build. Three cameras and seven joint fields are
+#: the shape of the vendor's own ``configs/vla/robotwin/robotwin.yaml``; the
+#: numbers are a competition parameter, which is exactly why they are arguments
+#: here and not constants in the package.
+LINGBOT_LAYOUT_FIXTURE = LingbotLayout(
+    model_config_file=LINGBOT_MODEL_CONFIG_FILE,
+    weights_index_file=LINGBOT_WEIGHTS_INDEX_FILE,
+    camera_names=("camera_top", "camera_wrist_left", "camera_wrist_right"),
+    joint_field_names=("j1", "j2", "j3", "j4", "j5", "j6", "gripper"),
+)
+
+
+def _lingbot(tree: list[dict[str, Any]], **kwargs: Any) -> list[FormatIssueCode]:
+    """Run the LingBot rules over a tree and return just the rejection codes."""
+    layout = kwargs.pop("layout", LINGBOT_LAYOUT_FIXTURE)
+    return [i.code for i in check_lingbot_layout(_files(tree), layout, **kwargs).errors]
+
+
+def _without(tree: list[dict[str, Any]], *paths: str) -> list[dict[str, Any]]:
+    return [e for e in tree if e["path"] not in paths]
+
+
+# ── Mutual exclusion: the 2x2 that has to hold on the day the base model
+#    changes ──────────────────────────────────────────────────────────────
+
+
+def test_lingbot_reference_tree_is_accepted() -> None:
+    """The vendor's own reference checkpoint must pass. If this goes red, the
+    rules reject the very thing miners are told to start from."""
+    report = check_lingbot_layout(
+        _files(LINGBOT_REFERENCE_TREE),
+        LINGBOT_LAYOUT_FIXTURE,
+        weight_map=LINGBOT_WEIGHT_MAP,
+    )
+    assert report.ok, report.errors
+    assert report.kind is CheckpointKind.PYTORCH
+    assert report.warnings == ()
+
+
+def test_lingbot_tree_is_not_an_openpi_checkpoint() -> None:
+    """Fed to the openpi rules the same tree is rejected — the two rule sets do
+    not both claim the same repo."""
+    report = check_checkpoint_layout(_files(LINGBOT_REFERENCE_TREE))
+    assert not report.ok
+    assert FormatIssueCode.MISSING_NORM_STATS in [i.code for i in report.errors]
+
+
+def test_openpi_trees_are_not_lingbot_checkpoints() -> None:
+    """And the other way round. ``config.json`` happens to exist in uid 221's
+    repo, so what separates them is the weights layout, not one file name."""
+    for tree in (UID221_PYTORCH_TREE, UID181_JAX_TREE, UID130_NESTED_JAX_TREE):
+        assert FormatIssueCode.MISSING_WEIGHTS in _lingbot(tree), tree[0]["path"]
+
+
+def test_openpi_trees_still_accepted_after_the_base_model_change() -> None:
+    """The most expensive assertion in this file: the three repos that really
+    passed admission in round 1 still pass, byte counts included. Red here means
+    every existing miner is rejected on release day."""
+    for tree, kind, counted in (
+        (UID221_PYTORCH_TREE, CheckpointKind.PYTORCH, 1943 + 149 + 7233650272 + 119),
+        (UID181_JAX_TREE, CheckpointKind.JAX, None),
+        (UID130_NESTED_JAX_TREE, CheckpointKind.JAX, None),
+    ):
+        report = check_checkpoint_layout(_files(tree))
+        assert report.ok, report.errors
+        assert report.kind is kind
+        assert report.warnings == ()
+        if counted is not None:
+            assert report.counted_size_bytes == counted
+
+
+# ── One counter-example per rejection code, all derived from the real tree ─
+
+
+def test_lingbot_without_cli_config() -> None:
+    """Only when the competition asks for a descriptor. The reference checkpoint
+    has none, which is why the default layout does not ask."""
+    assert _lingbot(LINGBOT_REFERENCE_TREE) == []
+    layout = LingbotLayout(
+        model_config_file=LINGBOT_MODEL_CONFIG_FILE,
+        weights_index_file=LINGBOT_WEIGHTS_INDEX_FILE,
+        camera_names=LINGBOT_LAYOUT_FIXTURE.camera_names,
+        joint_field_names=LINGBOT_LAYOUT_FIXTURE.joint_field_names,
+        cli_config_file="lingbotvla_cli.yaml",
+    )
+    assert _lingbot(LINGBOT_REFERENCE_TREE, layout=layout) == [
+        FormatIssueCode.MISSING_CLI_CONFIG
+    ]
+
+
+def test_lingbot_without_model_config() -> None:
+    assert _lingbot(_without(LINGBOT_REFERENCE_TREE, "config.json")) == [
+        FormatIssueCode.MISSING_MODEL_CONFIG
+    ]
+
+
+def test_lingbot_without_any_weights() -> None:
+    stripped = [e for e in LINGBOT_REFERENCE_TREE if ".safetensors" not in e["path"]]
+    assert _lingbot(stripped) == [FormatIssueCode.MISSING_WEIGHTS]
+
+
+def test_lingbot_missing_one_shard() -> None:
+    """The index names six shards, the repo holds five."""
+    codes = _lingbot(
+        _without(LINGBOT_REFERENCE_TREE, "model-00003-of-00006.safetensors"),
+        weight_map=LINGBOT_WEIGHT_MAP,
+    )
+    assert codes == [FormatIssueCode.MISSING_WEIGHT_SHARD]
+
+
+def test_lingbot_missing_required_tensor() -> None:
+    """File names all correct, but the index has no action projection — a
+    Qwen3-VL that was never turned into a VLA."""
+    pruned = {k: v for k, v in LINGBOT_WEIGHT_MAP.items() if "action_in_proj" not in k}
+    codes = _lingbot(LINGBOT_REFERENCE_TREE, weight_map=pruned)
+    assert codes == [FormatIssueCode.MISSING_REQUIRED_TENSOR]
+
+
+def test_lingbot_bare_lora() -> None:
+    adapter = _tree(
+        ("file", 900 * 1024 * 1024, "adapter_model.safetensors"),
+        ("file", 1024, "adapter_config.json"),
+        ("file", 31, "config.json"),
+    )
+    assert _lingbot(adapter) == [FormatIssueCode.BARE_LORA_ADAPTER]
+
+
+def test_lingbot_lfs_pointers_only() -> None:
+    """Every file shrunk to its pointer size: nothing is missing, but no weights
+    were actually uploaded."""
+    pointers = [
+        {**e, "size": 135 if e["type"] == "file" else 0} for e in LINGBOT_REFERENCE_TREE
+    ]
+    assert _lingbot(pointers) == [FormatIssueCode.TOTAL_SIZE_TOO_SMALL]
+
+
+def test_lingbot_leftover_upload_state() -> None:
+    dirty = [*LINGBOT_REFERENCE_TREE, *_tree(("file", 42, ".git/config"))]
+    assert _lingbot(dirty) == [FormatIssueCode.LEFTOVER_UPLOAD_STATE]
+
+
+def test_lingbot_incomplete_file() -> None:
+    partial = [
+        *LINGBOT_REFERENCE_TREE,
+        *_tree(("file", 42, "model-00001-of-00006.safetensors.tmp")),
+    ]
+    assert _lingbot(partial) == [FormatIssueCode.INCOMPLETE_FILE]
+
+
+def test_lingbot_never_reports_openpi_only_codes() -> None:
+    """The three codes tied to openpi paths must never come out of the LingBot
+    rules — where LingBot keeps its normalization stats is not documented
+    anywhere we could verify, so guessing a path would reject everyone."""
+    openpi_only = {
+        FormatIssueCode.MISSING_NORM_STATS,
+        FormatIssueCode.NON_CANONICAL_NORM_STATS,
+        FormatIssueCode.UNLOADABLE_WEIGHTS_FORMAT,
+    }
+    trees = [
+        LINGBOT_REFERENCE_TREE,
+        _without(LINGBOT_REFERENCE_TREE, "config.json"),
+        UID221_PYTORCH_TREE,
+        UID181_JAX_TREE,
+    ]
+    for tree in trees:
+        report = check_lingbot_layout(_files(tree), LINGBOT_LAYOUT_FIXTURE)
+        seen = {i.code for i in (*report.errors, *report.warnings)}
+        assert not (seen & openpi_only), seen
+
+
+# ── What the fingerprint covers changed shape, even though its code did not ─
+
+
+def test_lingbot_fingerprint_is_not_only_the_weights() -> None:
+    """🔴 The audit result, made executable.
+
+    In every openpi repo the LFS set **is** the weights, so the fingerprint was
+    de facto "these weights". In the LingBot reference repo nine files are LFS
+    and only six of them are the VLA shards: three README images, a frozen depth
+    model, a frozen video teacher and the tokenizer travel as LFS too. Deleting
+    a picture therefore changes the fingerprint.
+
+    That is not a bug in ``model_hash`` — it is the same rule applied to a
+    differently shaped repo — but it means plagiarism dedup gets weaker exactly
+    when the base model changes, and the backend has to know it.
+    """
+    full = model_hash_from_hf_tree(LINGBOT_REFERENCE_TREE)
+    without_a_picture = model_hash_from_hf_tree(
+        _without(LINGBOT_REFERENCE_TREE, "assets/lingbot_vla2_framework.png")
+    )
+    assert full != without_a_picture
+
+    # The same edit on an openpi repo changes nothing, because its non-weight
+    # files were never LFS.
+    assert (
+        model_hash_from_hf_tree(_without(UID221_PYTORCH_TREE, "config.json"))
+        == UID221_MODEL_HASH
+    )
+
+
+def test_lingbot_fingerprint_survives_a_repo_rename() -> None:
+    """The property dedup actually depends on: same weights, different repo, same
+    fingerprint. Paths are not part of the input, so this holds unchanged."""
+    renamed = [{**e, "path": f"copy/{e['path']}"} for e in LINGBOT_REFERENCE_TREE]
+    assert model_hash_from_hf_tree(renamed) == model_hash_from_hf_tree(
+        LINGBOT_REFERENCE_TREE
+    )
+
+
+def test_golden_tree_count_is_pinned() -> None:
+    """Four module-level trees: three real openpi submissions and one vendor
+    reference checkpoint. Adding a fifth has to be a deliberate edit here."""
+    trees = [
+        v for k, v in globals().items() if k.endswith("_TREE") and isinstance(v, list)
+    ]
+    assert len(trees) == 4
+
+
+def test_lingbot_fixture_declares_its_source() -> None:
+    """A fixture with no provenance only proves the code matches whoever wrote
+    it. Keep repo / revision / fetch date next to the tree."""
+    source = Path(__file__).read_text(encoding="utf-8")
+    header = source.split("LINGBOT_REFERENCE_TREE = _tree(")[0][-900:]
+    for marker in ("repo=", "revision=", "fetched="):
+        assert marker in header, marker

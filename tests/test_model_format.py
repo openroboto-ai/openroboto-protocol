@@ -8,13 +8,27 @@ rejected** (rejecting wrongly = burning a slot of GPU time for nothing).
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError, replace
+from pathlib import Path
+from typing import get_type_hints
+
+import pytest
+
+from openroboto_protocol import model_format
 from openroboto_protocol.model_format import (
     LIBERO_LAYOUT,
+    LINGBOT_MODEL_CONFIG_FILE,
+    LINGBOT_REQUIRED_TENSOR_PREFIXES,
+    LINGBOT_WEIGHTS_INDEX_FILE,
     MIN_TOTAL_SIZE_BYTES,
+    REJECTING_ISSUE_CODES,
+    WARNING_ISSUE_CODES,
     CheckpointFile,
     CheckpointKind,
     FormatIssueCode,
+    LingbotLayout,
     check_checkpoint_layout,
+    check_lingbot_layout,
 )
 
 BIG = 900 * 1024 * 1024
@@ -222,3 +236,361 @@ def test_legacy_norm_stats_location_passes_admission_with_a_warning() -> None:
 def test_bare_norm_stats_at_the_root_also_passes_with_a_warning() -> None:
     files = _f("model.safetensors", "norm_stats.json")
     assert _warn_codes(files) == [FormatIssueCode.NON_CANONICAL_NORM_STATS]
+
+
+# ── LingBot-VLA 2.0: a second rule set, added in 0.7.0 ────────────────────
+#
+# The openpi cases above are the contract miners have been submitting against
+# since round 1. Everything below is additive; nothing above changed.
+
+LINGBOT_LAYOUT = LingbotLayout(
+    model_config_file=LINGBOT_MODEL_CONFIG_FILE,
+    weights_index_file=LINGBOT_WEIGHTS_INDEX_FILE,
+    camera_names=("camera_top", "camera_wrist"),
+    joint_field_names=("j1", "j2", "j3", "j4", "j5", "j6", "gripper"),
+)
+LINGBOT_MINIMAL = (
+    "config.json",
+    "model.safetensors.index.json",
+    "model-00001-of-00002.safetensors",
+    "model-00002-of-00002.safetensors",
+)
+LINGBOT_WEIGHT_MAP = {
+    "model.action_in_proj.weight": "model-00001-of-00002.safetensors",
+    "model.action_out_proj.weight": "model-00001-of-00002.safetensors",
+    "model.state_proj.weight": "model-00001-of-00002.safetensors",
+    "model.qwenvl_with_expert.qwen_expert.model.layers.0.mlp.gate.weight": (
+        "model-00002-of-00002.safetensors"
+    ),
+}
+
+
+def _lb(
+    *paths: str,
+    size: int = BIG,
+    layout: LingbotLayout | None = None,
+    weight_map: dict[str, str] | None = None,
+    allowed_path_segments: frozenset[str] = frozenset(),
+) -> tuple[list[FormatIssueCode], list[FormatIssueCode]]:
+    """Run the LingBot rules and return (rejection codes, warning codes)."""
+    report = check_lingbot_layout(
+        _f(*paths, size=size),
+        layout or LINGBOT_LAYOUT,
+        weight_map=weight_map,
+        allowed_path_segments=allowed_path_segments,
+    )
+    return [i.code for i in report.errors], [i.code for i in report.warnings]
+
+
+# ── The layout object itself ──────────────────────────────────────────────
+
+
+def test_lingbot_layout_is_frozen_and_fully_typed() -> None:
+    """The five fields must come from one competition row, so they travel bound
+    together and cannot be reassigned afterwards."""
+    hints = get_type_hints(LingbotLayout)
+    assert set(hints) == {
+        "model_config_file",
+        "weights_index_file",
+        "camera_names",
+        "joint_field_names",
+        "cli_config_file",
+    }
+    assert hints["camera_names"] == tuple[str, ...]
+    assert hints["joint_field_names"] == tuple[str, ...]
+    with pytest.raises(FrozenInstanceError):
+        LINGBOT_LAYOUT.model_config_file = "other.json"  # type: ignore[misc]
+
+
+def test_camera_names_are_never_a_package_constant() -> None:
+    """Two cameras this season, maybe three next season. Freezing either count
+    into the package means publishing a release to change a camera count, and
+    every miner upgrading the CLI for it."""
+    assert [n for n in dir(model_format) if "CAMERA" in n] == []
+    assert [n for n in dir(model_format) if "JOINT" in n] == []
+
+
+def test_there_is_no_lingbot_layout_singleton() -> None:
+    """``LIBERO_LAYOUT`` can be a singleton because every field of it is a
+    constant. Three fields of ``LingbotLayout`` come from a competition's
+    parameters, so a singleton would freeze one season into the package."""
+    assert not hasattr(model_format, "LINGBOT_LAYOUT")
+
+
+def test_lingbot_file_name_constants() -> None:
+    """Read off robbyant/lingbot-vla-v2-6b@11c703bf. Changing one silently
+    changes who gets rejected."""
+    assert LINGBOT_MODEL_CONFIG_FILE == "config.json"
+    assert LINGBOT_WEIGHTS_INDEX_FILE == "model.safetensors.index.json"
+    assert LINGBOT_REQUIRED_TENSOR_PREFIXES == frozenset(
+        {
+            "model.action_in_proj",
+            "model.action_out_proj",
+            "model.state_proj",
+            "model.qwenvl_with_expert.qwen_expert.",
+        }
+    )
+
+
+def test_checkpoint_kind_still_has_exactly_two_members() -> None:
+    """No ``LINGBOT`` member was added. This enum is the weight *form* and its
+    literals match the evaluator's ``checkpoint_type``; LingBot ships sharded
+    safetensors, so its form is ``pytorch``. Which base model a checkpoint holds
+    is expressed by the layout the caller chose — an orthogonal question that
+    does not belong in the same enum."""
+    assert sorted(k.value for k in CheckpointKind) == ["jax", "pytorch"]
+
+
+# ── Must be accepted ──────────────────────────────────────────────────────
+
+
+def test_minimal_lingbot_checkpoint_is_accepted() -> None:
+    report = check_lingbot_layout(_f(*LINGBOT_MINIMAL), LINGBOT_LAYOUT)
+    assert report.ok, report.errors
+    assert report.kind is CheckpointKind.PYTORCH
+
+
+def test_lingbot_nesting_is_accepted_like_openpi() -> None:
+    """uid 130 put a whole openpi checkpoint under ``merged/`` and it was a legal
+    submission; the same has to hold here."""
+    nested = [f"merged/{p}" for p in LINGBOT_MINIMAL]
+    assert check_lingbot_layout(_f(*nested), LINGBOT_LAYOUT).ok
+
+
+def test_lingbot_deeper_nesting_warns_but_passes() -> None:
+    nested = [f"a/b/c/{p}" for p in LINGBOT_MINIMAL]
+    report = check_lingbot_layout(_f(*nested), LINGBOT_LAYOUT)
+    assert report.ok
+    assert [i.code for i in report.warnings] == [FormatIssueCode.NESTED_TOO_DEEP]
+
+
+def test_lingbot_cli_config_present_satisfies_the_rule() -> None:
+    """When a competition does name an export descriptor, having it is enough —
+    the rule looks for the name the competition gave, not a hard-coded one."""
+    layout = replace(LINGBOT_LAYOUT, cli_config_file="lingbotvla_cli.yaml")
+    errors, _ = _lb(*LINGBOT_MINIMAL, "lingbotvla_cli.yaml", layout=layout)
+    assert errors == []
+
+
+def test_lingbot_rejected_segments_can_be_whitelisted() -> None:
+    """The same escape hatch openpi has, for the day a real miner is falsely
+    rejected."""
+    errors, _ = _lb(
+        *LINGBOT_MINIMAL, ".cache/x.bin", allowed_path_segments=frozenset({".cache"})
+    )
+    assert errors == []
+
+
+# ── Must be rejected ──────────────────────────────────────────────────────
+
+
+def test_lingbot_without_the_weight_index_is_not_recognized() -> None:
+    """A bare ``model.safetensors`` beside a ``config.json`` is what an openpi
+    PyTorch submission looks like. Accepting it here would mean one repo
+    satisfies both rule sets, which is the thing the two of them exist to keep
+    apart."""
+    errors, _ = _lb("config.json", "model.safetensors")
+    assert errors == [FormatIssueCode.MISSING_WEIGHTS]
+
+
+def test_a_caller_supplied_weight_map_stands_in_for_the_index_file() -> None:
+    """A caller that read the inventory some other way already knows what this
+    is; do not make it upload a file to prove it."""
+    unsharded = {k: "model.safetensors" for k in LINGBOT_WEIGHT_MAP}
+    errors, _ = _lb("config.json", "model.safetensors", weight_map=unsharded)
+    assert errors == []
+
+
+def test_lingbot_without_model_config_is_rejected() -> None:
+    errors, _ = _lb(*[p for p in LINGBOT_MINIMAL if p != "config.json"])
+    assert errors == [FormatIssueCode.MISSING_MODEL_CONFIG]
+
+
+def test_lingbot_bare_lora_is_rejected_with_its_own_reason() -> None:
+    errors, _ = _lb("config.json", "adapter_config.json", "adapter_model.safetensors")
+    assert errors == [FormatIssueCode.BARE_LORA_ADAPTER]
+
+
+def test_lingbot_adapter_beside_merged_weights_is_fine() -> None:
+    errors, _ = _lb(*LINGBOT_MINIMAL, "adapter_model.safetensors")
+    assert errors == []
+
+
+def test_lingbot_missing_shard_names_the_file() -> None:
+    """The message has to say which shard, otherwise the miner has to diff the
+    index by hand."""
+    files = _f(*[p for p in LINGBOT_MINIMAL if p != "model-00002-of-00002.safetensors"])
+    report = check_lingbot_layout(files, LINGBOT_LAYOUT, weight_map=LINGBOT_WEIGHT_MAP)
+    assert [i.code for i in report.errors] == [FormatIssueCode.MISSING_WEIGHT_SHARD]
+    assert "model-00002-of-00002.safetensors" in report.errors[0].message
+
+
+def test_lingbot_weight_map_omitted_skips_the_shard_rules() -> None:
+    """No index read means no evidence about shards — absence of evidence must
+    not turn into a rejection."""
+    errors, _ = _lb(*[p for p in LINGBOT_MINIMAL if not p.startswith("model-0000")])
+    assert FormatIssueCode.MISSING_WEIGHT_SHARD not in errors
+    assert FormatIssueCode.MISSING_REQUIRED_TENSOR not in errors
+
+
+def test_lingbot_without_the_action_expert_is_rejected() -> None:
+    """Every file name right, but the tensors are a plain Qwen3-VL: it would
+    load and then have nothing to produce actions with."""
+    pruned = {
+        k: v
+        for k, v in LINGBOT_WEIGHT_MAP.items()
+        if not k.startswith("model.qwenvl_with_expert.qwen_expert.")
+    }
+    errors, _ = _lb(*LINGBOT_MINIMAL, weight_map=pruned)
+    assert errors == [FormatIssueCode.MISSING_REQUIRED_TENSOR]
+
+
+def test_lingbot_too_small_repo_is_rejected() -> None:
+    errors, _ = _lb(*LINGBOT_MINIMAL, size=1024)
+    assert errors == [FormatIssueCode.TOTAL_SIZE_TOO_SMALL]
+
+
+def test_lingbot_size_is_not_reported_on_top_of_a_real_problem() -> None:
+    """Same judgement order as openpi: a broken repo is small anyway, so the
+    size is only reported when nothing else is wrong."""
+    errors, _ = _lb("model.safetensors", size=10)
+    assert errors == [
+        FormatIssueCode.MISSING_MODEL_CONFIG,
+        FormatIssueCode.MISSING_WEIGHTS,
+    ]
+
+
+# ── The two checkers share one set of base-model-independent rules ─────────
+
+
+def test_both_checkers_scan_shared_rules_alike() -> None:
+    """``check_lingbot_layout`` re-implements the per-file scan instead of
+    refactoring ``check_checkpoint_layout`` into a shared helper: that function
+    decides whether TAO a miner already burned counts, it has been published
+    since 0.6.0, and an empty diff is the cheapest proof it still judges round 1
+    the way it did.
+
+    This test is what buys that duplication back. If the two copies ever drift on
+    repo-internal state, unfinished uploads or the counted byte total, it goes
+    red — instead of a miner going missing.
+    """
+    cases = [
+        _f("model.safetensors", NORM_STATS),
+        _f("model.safetensors", NORM_STATS, ".gitattributes"),
+        _f("model.safetensors", NORM_STATS, ".cache/huggingface/x.bin"),
+        _f("model.safetensors", NORM_STATS, "checkpoint.001.tmp"),
+        _f("a/b/.git/config", "model.safetensors", NORM_STATS, size=7),
+    ]
+    shared = {
+        FormatIssueCode.LEFTOVER_UPLOAD_STATE,
+        FormatIssueCode.INCOMPLETE_FILE,
+    }
+    for files in cases:
+        openpi = check_checkpoint_layout(files)
+        lingbot = check_lingbot_layout(files, LINGBOT_LAYOUT)
+        assert openpi.counted_size_bytes == lingbot.counted_size_bytes, files
+        assert [i for i in openpi.errors if i.code in shared] == [
+            i for i in lingbot.errors if i.code in shared
+        ], files
+
+
+def test_shared_thresholds_are_not_duplicated() -> None:
+    """The 10 MB floor and the nesting depth are base-model-independent, so both
+    checkers read the same constant rather than each carrying a literal."""
+    source = Path(model_format.__file__).read_text(encoding="utf-8")
+    assert source.count("10 * 1024 * 1024") == 1
+    assert MIN_TOTAL_SIZE_BYTES == 10 * 1024 * 1024
+
+
+# ── The codes are the outward contract ────────────────────────────────────
+
+
+def test_the_nine_original_issue_codes_still_have_their_values() -> None:
+    """Miner scripts, frontend copy and alert rules all match on these strings.
+    Changing one does not break a build anywhere — it silently stops matching."""
+    assert {c.value for c in FormatIssueCode} >= {
+        "missing_weights",
+        "bare_lora_adapter",
+        "missing_norm_stats",
+        "leftover_upload_state",
+        "incomplete_file",
+        "total_size_too_small",
+        "unloadable_weights_format",
+        "non_canonical_norm_stats",
+        "nested_too_deep",
+    }
+
+
+def test_the_lingbot_issue_codes_exist_with_the_agreed_values() -> None:
+    for value in (
+        "missing_cli_config",
+        "missing_model_config",
+        "missing_weight_shard",
+        "missing_required_tensor",
+        "base_model_mismatch",
+        "io_contract_mismatch",
+    ):
+        assert FormatIssueCode(value).value == value
+
+
+def test_issue_code_count_is_pinned() -> None:
+    """Adding a code is a contract change; it should not slip in unnoticed."""
+    assert len(FormatIssueCode) == 15
+
+
+def test_every_issue_code_explains_itself() -> None:
+    """A code a miner cannot look up is a code they cannot act on. The length
+    floor keeps out docstrings that only restate the name."""
+    for code in FormatIssueCode:
+        assert code.__doc__ and len(code.__doc__) > 20, code
+
+
+def test_codes_are_partitioned_into_rejecting_and_warning() -> None:
+    """The split used to live only in a ``(warning)`` prefix inside docstrings,
+    with nothing guarding it. Forgetting to classify a new code now goes red."""
+    assert REJECTING_ISSUE_CODES | WARNING_ISSUE_CODES == set(FormatIssueCode)
+    assert not REJECTING_ISSUE_CODES & WARNING_ISSUE_CODES
+
+
+def test_every_lingbot_code_rejects() -> None:
+    """All six mean the evaluator cannot load or cannot run it, so letting them
+    through would burn a GPU slot for nothing."""
+    for code in (
+        FormatIssueCode.MISSING_CLI_CONFIG,
+        FormatIssueCode.MISSING_MODEL_CONFIG,
+        FormatIssueCode.MISSING_WEIGHT_SHARD,
+        FormatIssueCode.MISSING_REQUIRED_TENSOR,
+        FormatIssueCode.BASE_MODEL_MISMATCH,
+        FormatIssueCode.IO_CONTRACT_MISMATCH,
+    ):
+        assert code in REJECTING_ISSUE_CODES
+        assert code not in WARNING_ISSUE_CODES
+
+
+def test_module_exports_are_pinned() -> None:
+    """``__all__`` is what SemVer's promise is about; without it there is no
+    criterion separating a patch from a major (AGENTS.md §1②)."""
+    assert model_format.__all__ == [
+        "INCOMPLETE_FILE_SUFFIXES",
+        "LEGACY_NORM_STATS_RELPATHS",
+        "LEGACY_PYTORCH_WEIGHTS_FILE",
+        "LIBERO_LAYOUT",
+        "LINGBOT_MODEL_CONFIG_FILE",
+        "LINGBOT_REQUIRED_TENSOR_PREFIXES",
+        "LINGBOT_WEIGHTS_INDEX_FILE",
+        "LORA_ADAPTER_MARKERS",
+        "MAX_CHECKPOINT_NESTING_DEPTH",
+        "MIN_TOTAL_SIZE_BYTES",
+        "REJECTED_PATH_SEGMENTS",
+        "REJECTING_ISSUE_CODES",
+        "WARNING_ISSUE_CODES",
+        "CheckpointFile",
+        "CheckpointKind",
+        "FormatIssue",
+        "FormatIssueCode",
+        "FormatReport",
+        "LingbotLayout",
+        "OpenpiLayout",
+        "check_checkpoint_layout",
+        "check_lingbot_layout",
+    ]
