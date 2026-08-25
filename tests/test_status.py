@@ -324,3 +324,111 @@ def test_normalize_status_passes_unknown_through() -> None:
 def test_legacy_alias_table_is_read_only() -> None:
     with pytest.raises(TypeError):
         S.LEGACY_STATUS_ALIASES["done"] = "banana"  # type: ignore[index]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-track vocabularies
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_season_status_values_are_pinned() -> None:
+    """Word for word, in the order a season passes through them. A backend
+    migration builds its CHECK constraint from this tuple, so losing one word
+    here silently makes a legal state unstorable."""
+    assert S.SEASON_STATUS_VALUES == (
+        "awaiting_eval",
+        "awaiting_settlement",
+        "paying_out",
+        "paid_out",
+        "burned",
+    )
+    assert S.SEASON_STATUS_VALUES == tuple(s.value for s in S.SeasonStatus)
+
+
+def test_invalid_reason_values_are_pinned() -> None:
+    """Exactly the word list of `ck_submissions_invalid_reason` in the backend's
+    0004 migration. The `hf_` prefix is part of the code: the next family of
+    reasons (payment amount, wrong coldkey, wrong payer) must not collide with a
+    bare `unauthorized`."""
+    assert S.INVALID_REASON_VALUES == (
+        "hf_forbidden",
+        "hf_access_revoked",
+        "hf_repo_not_found",
+        "hf_revision_not_found",
+        "hf_files_incomplete",
+    )
+    assert S.INVALID_REASON_VALUES == tuple(r.value for r in S.InvalidReason)
+
+
+def test_the_real_track_adds_no_submission_status() -> None:
+    """🔴 Real-track submissions live in the same `submissions` table, keyed by
+    `competition_id`, so they use the same eight lifecycle words. Two
+    vocabularies on one column is the 2026-08-14 incident itself.
+
+    `registered` and `invalid` were considered and dropped: they map onto
+    `received` and `rejected` (plus an `InvalidReason`).
+    """
+    new_words = set(S.SEASON_STATUS_VALUES) | set(S.INVALID_REASON_VALUES)
+    assert new_words & S.ALL_STATUSES == set()
+    assert new_words & S.ALL_STAGES == set()
+    assert {"registered", "invalid"} & new_words == set()
+
+
+def test_the_two_real_track_vocabularies_do_not_overlap() -> None:
+    """A season word and a disqualification word are answers to different
+    questions; one string that could be either is a bug waiting to happen."""
+    assert set(S.SEASON_STATUS_VALUES) & set(S.INVALID_REASON_VALUES) == set()
+
+
+def test_no_appeal_vocabulary_exists() -> None:
+    """⛔ There is no appeals process (spec 10 §2.5). A word for it in the
+    protocol package would be an invitation to implement one."""
+    assert {"disputed", "appealed"} & set(S.SEASON_STATUS_VALUES) == set()
+    assert {"disputed", "appealed"} & set(S.INVALID_REASON_VALUES) == set()
+
+
+def test_episode_failure_codes_are_not_status_words() -> None:
+    """`hw_failed` / `model_error` classify **one episode**, not a submission —
+    they decide who pays for a re-run, and they live in `schemas.EpisodeFailure`.
+    Putting them here would make "one episode's arm jammed" and "this entry is
+    finished" the same kind of thing."""
+    assert {"hw_failed", "model_error"} & set(S.SEASON_STATUS_VALUES) == set()
+    assert {"hw_failed", "model_error"} & set(S.INVALID_REASON_VALUES) == set()
+    assert {"hw_failed", "model_error"} & S.ALL_STATUSES == set()
+
+
+def test_module_exports_are_pinned() -> None:
+    """`__all__` is the public surface the version number promises."""
+    assert S.__all__ == [
+        "ALL_STAGES",
+        "ALL_STATUSES",
+        "FROZEN_STATUSES",
+        "INVALID_REASON_VALUES",
+        "LEGACY_STATUS_ALIASES",
+        "SEASON_STATUS_VALUES",
+        "STAGES",
+        "STAGE_CLAIMED",
+        "STAGE_DOWNLOADING",
+        "STAGE_PRECHECKING",
+        "STAGE_RUNNING",
+        "STATUS_BURN_CHECKING",
+        "STATUS_BURN_PASSED",
+        "STATUS_EVALUATED",
+        "STATUS_EVALUATING",
+        "STATUS_EVAL_FAILED",
+        "STATUS_PENDING",
+        "STATUS_RECEIVED",
+        "STATUS_REJECTED",
+        "STATUS_SEED_FAILED",
+        "STATUS_SUPERSEDED",
+        "STATUS_TRANSITIONS",
+        "TERMINAL_STATUSES",
+        "InvalidReason",
+        "SeasonStatus",
+        "Stage",
+        "can_transition",
+        "is_terminal",
+        "normalize_stage",
+        "normalize_status",
+    ]
+    assert all(hasattr(S, name) for name in S.__all__)

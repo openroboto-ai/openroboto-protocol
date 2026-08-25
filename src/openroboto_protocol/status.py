@@ -22,6 +22,11 @@ version number cannot disagree.
 time, but they are not the same vocabulary, and either side written with the other
 side's word is judged illegal by that other side.
 
+The real track adds two more vocabularies at the bottom of this file — `SeasonStatus`
+(how far one season has got) and `InvalidReason` (why a submission was disqualified).
+It deliberately adds **no** submission status: real-track submissions live in the same
+table and use the same eight lifecycle words.
+
 ⚠️ What is discussed here is the **vocabulary**, not the field name carrying it, and
 certainly not the database column name. The response field carrying the lifecycle status
 **differs per endpoint** — `SubmissionRecord` calls it `status`, the other four models
@@ -50,8 +55,44 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
+
+#: The public surface of this module (AGENTS.md §1②: without it there is no line
+#: between `patch` and `major`).
+__all__ = [
+    "ALL_STAGES",
+    "ALL_STATUSES",
+    "FROZEN_STATUSES",
+    "INVALID_REASON_VALUES",
+    "LEGACY_STATUS_ALIASES",
+    "SEASON_STATUS_VALUES",
+    "STAGES",
+    "STAGE_CLAIMED",
+    "STAGE_DOWNLOADING",
+    "STAGE_PRECHECKING",
+    "STAGE_RUNNING",
+    "STATUS_BURN_CHECKING",
+    "STATUS_BURN_PASSED",
+    "STATUS_EVALUATED",
+    "STATUS_EVALUATING",
+    "STATUS_EVAL_FAILED",
+    "STATUS_PENDING",
+    "STATUS_RECEIVED",
+    "STATUS_REJECTED",
+    "STATUS_SEED_FAILED",
+    "STATUS_SUPERSEDED",
+    "STATUS_TRANSITIONS",
+    "TERMINAL_STATUSES",
+    "InvalidReason",
+    "SeasonStatus",
+    "Stage",
+    "can_transition",
+    "is_terminal",
+    "normalize_stage",
+    "normalize_status",
+]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Submission status (lifecycle)
@@ -357,3 +398,121 @@ def normalize_status(status: str) -> str:
     judged by `ALL_STATUSES`.
     """
     return LEGACY_STATUS_ALIASES.get(status, status)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-track vocabularies (season progress · disqualification reasons)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 🔴 **Neither of these is a submission status.** Real-track submissions live in
+# the same `submissions` table as simulation ones, told apart by
+# `competition_id`, so they share the same `status` column and the same eight
+# words above. "Only one vocabulary in the database" applies to the real track
+# word for word; this module does not invent a second one.
+#
+# How the real track's own wording (spec 10 §2.5) lands on those eight words:
+#
+#     registered / awaiting evaluation  → received
+#     evaluating                        → evaluating
+#     finished                          → evaluated
+#     disqualified                      → rejected, plus an InvalidReason
+#
+# `disqualified` does not become a status of its own because it is a **reason**,
+# not a terminal state: the terminal state is `rejected`, and which of the five
+# reasons applies is what a miner actually needs to be told. The same shape is
+# already in production — `supersede_pending` writes `rejected` plus a reason
+# prefix because the CHECK constraint has no `superseded`.
+#
+# ⚠️ One invariant this package cannot express, guarded on the backend side: a
+# real-track row never enters `status='pending'`. That word is the simulation
+# dispatcher's tenant key.
+
+
+class SeasonStatus(StrEnum):
+    """How far one **season** has got — the real track is a tournament run in
+    seasons, so this describes the season, never a single submission (spec 10
+    §4.3).
+
+    🔴 It is **not** `competitions.status`, which is the row's lifecycle
+    (`draft` / `active` / `archived`, ADR 03 §3.3), and it is not the phase
+    derived from the season's five timestamps either. Storing this next to
+    either of those would create two answers to the same question; it belongs on
+    the settlement record.
+
+    Written by the system, never by a miner or an operator.
+    """
+
+    AWAITING_EVAL = "awaiting_eval"
+    """Submissions have closed and the entry list is locked; evaluation has not
+    finished. Written when `submit_closes_at` passes (spec 10 §4.3)."""
+
+    AWAITING_SETTLEMENT = "awaiting_settlement"
+    """Every entry has been evaluated; the ranking and the qualification
+    threshold have not been settled yet (spec 10 §4.3)."""
+
+    PAYING_OUT = "paying_out"
+    """Settled, and the payout plans exist but have not all been executed. It is
+    the only word during which money is in flight, so a crash here is resumed
+    from, not restarted (spec 10 §4.3)."""
+
+    PAID_OUT = "paid_out"
+    """Both payout plans have been executed in full. Terminal (spec 10
+    §4.3)."""
+
+    BURNED = "burned"
+    """Nobody met the qualification threshold, so the whole prize pool was
+    burned. Terminal, and **not a failure** — it is the designed outcome of a
+    season with no qualifying entry (spec 10 §4.3)."""
+
+
+class InvalidReason(StrEnum):
+    """Why a submission was disqualified — the stable code stored alongside
+    `status='rejected'` (spec 10 §2.5, §3.2).
+
+    All five are HuggingFace access findings, which is why they carry the `hf_`
+    prefix: a reason vocabulary grows, and the next family (payment amount
+    wrong, wrong coldkey, wrong payer) must not collide with a bare
+    `unauthorized`.
+
+    ⚠️ Not the same layer as `schemas.ReasonCode`: that one is the
+    SCREAMING_SNAKE code the public API hands to a client inside `Reason`, this
+    one is the value stored in the column. The mapping between them is the
+    backend's job.
+
+    Access is **re-checked until evaluation finishes**, so a submission can
+    become invalid after having been accepted — that is what `access_revoked`
+    exists for.
+    """
+
+    FORBIDDEN = "hf_forbidden"
+    """The official evaluation account was never added as a collaborator, so the
+    weights cannot be read at all."""
+
+    ACCESS_REVOKED = "hf_access_revoked"
+    """Access existed at submission time and was taken away before evaluation
+    finished. A separate word from `hf_forbidden` on purpose: this one says the
+    miner changed something after paying."""
+
+    REPO_NOT_FOUND = "hf_repo_not_found"
+    """No repository by that name — a typo in `hf_repo_id`, or it was
+    deleted."""
+
+    REVISION_NOT_FOUND = "hf_revision_not_found"
+    """The repository exists but the `hf_commit` pinned on chain does not. The
+    commit is what makes an evaluation reproducible, so falling back to the
+    default branch is forbidden."""
+
+    FILES_INCOMPLETE = "hf_files_incomplete"
+    """The repository is reachable but does not contain a loadable checkpoint
+    (see `model_format.py` for the required shape)."""
+
+
+#: The value tuple of `SeasonStatus`, in the order a season passes through it.
+#: A backend migration builds its CHECK constraint straight from this, so
+#: "in the enum but not in the constraint" cannot happen.
+SEASON_STATUS_VALUES: Final[tuple[str, ...]] = tuple(s.value for s in SeasonStatus)
+
+#: The value tuple of `InvalidReason`. Same use, same reason.
+#: It is exactly the word list of `ck_submissions_invalid_reason` in the
+#: backend's 0004 migration.
+INVALID_REASON_VALUES: Final[tuple[str, ...]] = tuple(r.value for r in InvalidReason)
