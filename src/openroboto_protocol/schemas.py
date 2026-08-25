@@ -83,6 +83,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import (
     Annotated,
     Any,
@@ -98,6 +99,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     StrictFloat,
     StrictInt,
     ValidationError,
@@ -142,6 +144,10 @@ CODE_INVALID_SCORE: Final[str] = "INVALID_SCORE"
 CODE_MISSING_ENVS: Final[str] = "MISSING_ENVS"
 #: The stage word of a progress report is not in the controlled vocabulary.
 CODE_INVALID_STAGE: Final[str] = "INVALID_STAGE"
+#: An episode's `success` and its `failure` classification contradict each other.
+#: **It decides who pays for the re-run**, so an episode that disagrees with itself
+#: cannot be stored and later argued about.
+CODE_EPISODE_FAILURE_MISMATCH: Final[str] = "EPISODE_FAILURE_MISMATCH"
 
 
 class Contract(BaseModel):
@@ -1908,6 +1914,123 @@ class ReadinessResponse(Contract):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Real track — POST /real/tasks/{id}/episodes
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 🔴 A **different shape** from the simulation scoring path, and deliberately a
+# different endpoint. Simulation posts one complete scorecard covering 6 suites
+# in a single request (`ScoreSubmission`); the real track posts **one episode per
+# request**, 24 of them per entry, each carrying two videos, two photos, their
+# sha256s and a failure classification. Folding both into one endpoint would take
+# a union or a jsonb blob — on the one entry point that writes the money path.
+#
+# `ScoreSubmission` / `EnvScore` / `ScoreAccepted` are not touched by any of this.
+
+
+class EpisodeFailure(StrEnum):
+    """Who is responsible when one episode fails. **This decides refunds**, so it is
+    a stable machine code, not a log line (spec 10 §7.3, §9).
+
+    ⚠️ There are exactly two. Adding a third (`operator_error`, `unknown`, …) would
+    put a process nobody has designed into the protocol, and the next person will
+    implement it.
+    """
+
+    HW_FAILED = "hw_failed"
+    """**Ours.** The arm, a camera, the network or the recording failed. The episode
+    is not scored and is re-run for free under a new `episode_idx`; the original
+    recording and the reason are kept (spec 10 §7.3)."""
+
+    MODEL_ERROR = "model_error"
+    """**The miner's.** The model timed out, emitted an illegal action, would not
+    start, or crashed. It is scored as a failed episode: no refund, no re-run."""
+
+
+class MediaRef(Contract):
+    """One piece of evidence: where it is, and what it hashes to.
+
+    The two are bound into one model rather than passed as parallel fields because
+    they have to come from the same upload. Spec 10 §5 (R9) freezes both once the
+    season's result is confirmed, and a reference whose digest is missing freezes
+    nothing — it can be swapped afterwards and no one can prove it.
+    """
+
+    #: A stable reference to the uploaded object. Empty string = not filled in, and
+    #: that is a missing field, not a value (settled in 0.2.0).
+    uri: Annotated[str, Field(min_length=1)]
+    #: 64 lowercase hex characters. Uppercase is rejected on purpose: the same file
+    #: in two spellings would compare unequal to itself.
+    sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    #: Size in bytes, when the uploader knows it. `None` = unknown, **not 0**.
+    bytes_len: StrictInt | None = None
+
+
+class EpisodeResult(Contract):
+    """The request body of `POST /real/tasks/{id}/episodes` — **one episode**, 24 per
+    entry (spec 10 §7.2).
+
+    Every judgement has to carry its reason, its log and its recording (spec 10
+    §7.3), which is why the four media references are required rather than
+    optional: an episode whose evidence is missing cannot be re-examined later, and
+    by then the prize has been paid out.
+    """
+
+    #: 1-based, unique within the entry (`(submission_id, episode_idx)`).
+    #:
+    #: ⚠️ **No upper bound here.** 24 = at most 8 tasks × 3 attempts (spec 10 §7.2),
+    #: and the number of tasks is a season parameter — freezing 24 into the package
+    #: would mean re-releasing it, and every miner upgrading the CLI, the first time
+    #: a season uses 10 tasks. The upper bound is checked by the backend against
+    #: that season's `params`.
+    episode_idx: Annotated[StrictInt, Field(ge=1)]
+    #: One of the season's published task names.
+    task_name: Annotated[str, Field(min_length=1)]
+    #: `StrictBool`, so `"success": "true"` cannot quietly become a pass: this field
+    #: is the score.
+    success: StrictBool
+    #: The operator's note on the verdict. For humans; clients must not branch on it.
+    verdict_note: str | None = None
+    #: Wall-clock length of the episode. `None` = not measured, **not 0**.
+    duration_sec: StrictFloat | None = None
+    #: Required exactly when `success` is false — see the two invariants below.
+    failure: EpisodeFailure | None = None
+    #: The two recordings of the run (spec 10 §7.2). Written as two fields rather
+    #: than a list because a list also permits 0, 1 or 5, and "this episode has one
+    #: recording" must be unrepresentable rather than something every caller has to
+    #: remember to check. Adding a third camera later is a minor bump (`video_c`).
+    video_a: MediaRef
+    video_b: MediaRef
+    #: The photos of the scene before and after the episode.
+    photo_start: MediaRef
+    photo_end: MediaRef
+    #: Where the operator's log for this episode is.
+    log_ref: str | None = None
+
+    @model_validator(mode="after")
+    def _failure_matches_success(self) -> EpisodeResult:
+        """`success` and `failure` must agree, in both directions.
+
+        A failed episode without a classification leaves "who pays for the re-run"
+        unanswerable, and a successful episode carrying `hw_failed` means one of the
+        two sides recorded the wrong thing. Both are cheap to reject now and
+        expensive to argue about after the payout.
+        """
+        if self.success and self.failure is not None:
+            raise ContractError(
+                CODE_EPISODE_FAILURE_MISMATCH,
+                f"a successful episode must not carry a failure code, got "
+                f"{self.failure.value!r}",
+            )
+        if not self.success and self.failure is None:
+            raise ContractError(
+                CODE_EPISODE_FAILURE_MISMATCH,
+                "a failed episode must be classified as hw_failed (ours, free "
+                "re-run) or model_error (the miner's, scored as a failure)",
+            )
+        return self
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Vocabulary self-check
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1931,6 +2054,7 @@ STATUS_VALUED_FIELDS: Final[tuple[tuple[type[Contract], str], ...]] = (
 )
 
 __all__ = [
+    "CODE_EPISODE_FAILURE_MISMATCH",
     "CODE_INVALID_SCORE",
     "CODE_INVALID_STAGE",
     "CODE_MISSING_ENVS",
@@ -1951,6 +2075,8 @@ __all__ = [
     "CurrentRoundResponse",
     "EnvScore",
     "Envelope",
+    "EpisodeFailure",
+    "EpisodeResult",
     "ErrorBody",
     "ErrorEnvelope",
     "EvalEnvironment",
@@ -1962,6 +2088,7 @@ __all__ = [
     "ListEnvelope",
     "ListMeta",
     "LivenessResponse",
+    "MediaRef",
     "Meta",
     "MinerRef",
     "ModelRef",

@@ -281,6 +281,21 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.CurrentRoundResponse: {"round"},
     s.RoundsSummary: {"rounds_settled", "cumulative_improvement"},
     s.RoundHistoryResponse: {"summary", "rounds", "total"},
+    # —— real track: one episode per request ——
+    s.MediaRef: {"uri", "sha256", "bytes_len"},
+    s.EpisodeResult: {
+        "episode_idx",
+        "task_name",
+        "success",
+        "verdict_note",
+        "duration_sec",
+        "failure",
+        "video_a",
+        "video_b",
+        "photo_start",
+        "photo_end",
+        "log_ref",
+    },
     # —— operational probes ——
     s.LivenessResponse: {"round", "netuid", "status"},
     s.ReadinessCheck: {"ok", "detail"},
@@ -1640,3 +1655,141 @@ def test_the_fields_phase_one_made_nullable_are_nullable() -> None:
             f"{field} 声明成 {annotation} —— 后端会发 null，"
             f"而这条路径上矿工已经付过 burn"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real track — one episode per request
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MEDIA = {"uri": "s3://ep/1.mp4", "sha256": "a" * 64}
+_EPISODE_BASE: dict[str, Any] = {
+    "episode_idx": 1,
+    "task_name": "pick_cube",
+    "video_a": _MEDIA,
+    "video_b": _MEDIA,
+    "photo_start": _MEDIA,
+    "photo_end": _MEDIA,
+}
+
+
+def test_episode_failure_has_exactly_two_codes() -> None:
+    """Spec 10 §7.3 and the §9 glossary both list these two and no more. A third
+    one (`operator_error`, `unknown`) would put a process nobody designed into
+    the protocol — and these codes decide who pays for the re-run."""
+    assert sorted(f.value for f in s.EpisodeFailure) == ["hw_failed", "model_error"]
+
+
+def test_media_ref_rejects_an_empty_uri() -> None:
+    """An empty string is a missing field, not a value (settled in 0.2.0)."""
+    with pytest.raises(ValidationError):
+        s.MediaRef(uri="", sha256="a" * 64)
+
+
+@pytest.mark.parametrize("bad", ["", "a" * 63, "a" * 65, "A" * 64, "g" * 64])
+def test_media_ref_rejects_a_malformed_sha256(bad: str) -> None:
+    """64 lowercase hex characters. Uppercase is rejected too: the same file in
+    two spellings would compare unequal to itself, and spec 10 §5 (R9) freezes
+    the digest once the season's result is confirmed."""
+    with pytest.raises(ValidationError):
+        s.MediaRef(uri="s3://x", sha256=bad)
+    assert s.MediaRef(uri="s3://x", sha256="a" * 64).sha256 == "a" * 64
+
+
+def test_episode_rejects_an_empty_task_name() -> None:
+    with pytest.raises(ValidationError):
+        s.EpisodeResult(**{**_EPISODE_BASE, "task_name": "", "success": True})
+
+
+@pytest.mark.parametrize("missing", ["video_a", "video_b", "photo_start", "photo_end"])
+def test_episode_requires_all_four_pieces_of_evidence(missing: str) -> None:
+    """Every judgement must carry its reason, its log and its recording (spec 10
+    §7.3). The error has to name the field that is missing — the person reading
+    it is an operator at a robot, not the author of this file."""
+    payload = {k: v for k, v in _EPISODE_BASE.items() if k != missing}
+    with pytest.raises(ValidationError) as exc:
+        s.EpisodeResult(**payload, success=True)
+    assert missing in str(exc.value)
+
+
+def test_a_successful_episode_must_not_carry_a_failure_code() -> None:
+    """The two sides recorded different things; storing it means arguing about
+    the refund after the payout."""
+    with pytest.raises(ValidationError) as exc:
+        s.EpisodeResult(
+            **_EPISODE_BASE, success=True, failure=s.EpisodeFailure.HW_FAILED
+        )
+    inner = exc.value.errors()[0]["ctx"]["error"]
+    assert isinstance(inner, s.ContractError)
+    assert inner.code == s.CODE_EPISODE_FAILURE_MISMATCH
+
+
+def test_a_failed_episode_must_be_classified() -> None:
+    """Without a classification "who pays for the re-run" has no answer:
+    `hw_failed` is a free re-run on us, `model_error` is scored as a failure."""
+    with pytest.raises(ValidationError) as exc:
+        s.EpisodeResult(**_EPISODE_BASE, success=False)
+    inner = exc.value.errors()[0]["ctx"]["error"]
+    assert inner.code == s.CODE_EPISODE_FAILURE_MISMATCH
+
+
+def test_the_two_legal_combinations_are_accepted() -> None:
+    """Success without a code, and failure with one."""
+    assert s.EpisodeResult(**_EPISODE_BASE, success=True).failure is None
+    failed = s.EpisodeResult(
+        **_EPISODE_BASE, success=False, failure=s.EpisodeFailure.MODEL_ERROR
+    )
+    assert failed.failure is s.EpisodeFailure.MODEL_ERROR
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_episode_idx_is_one_based(bad: int) -> None:
+    """Episode numbering starts at 1; 0 and negatives are always a bug."""
+    with pytest.raises(ValidationError):
+        s.EpisodeResult(**{**_EPISODE_BASE, "episode_idx": bad}, success=True)
+
+
+def test_episode_idx_has_no_upper_bound() -> None:
+    """24 = at most 8 tasks × 3 attempts, and the number of tasks is a **season
+    parameter**. Freezing 24 in here would mean releasing a new protocol package
+    and every miner upgrading the CLI the first time a season runs 10 tasks. The
+    upper bound belongs to the backend, against that season's `params`."""
+    assert s.EpisodeResult(**{**_EPISODE_BASE, "episode_idx": 99}, success=True)
+
+
+def test_episode_rejects_a_stringly_typed_success() -> None:
+    """`success` is the score. In lax mode `"true"` would become `True`, which is
+    the exact shape of the 2026-08-14 scoring incident."""
+    with pytest.raises(ValidationError):
+        s.EpisodeResult(**{**_EPISODE_BASE, "success": "true"})
+
+
+def test_episode_is_frozen() -> None:
+    episode = s.EpisodeResult(**_EPISODE_BASE, success=True)
+    with pytest.raises(ValidationError):
+        episode.success = False  # type: ignore[misc]
+
+
+def test_episode_ignores_unknown_fields() -> None:
+    """An operator client sending a field we do not know gets 200, not 422: for
+    a worker a 4xx is the "abandon this evaluation" button (spec 07 §0.3)."""
+    assert s.EpisodeResult(**_EPISODE_BASE, success=True, operator_id="op-3")
+
+
+def test_score_submission_untouched() -> None:
+    """🔴 The simulation scoring path does not move. The real track got its own
+    endpoint precisely so that this model would not have to grow a union."""
+    assert sorted(s.ScoreSubmission.model_fields) == [
+        "benchmark",
+        "duration_sec",
+        "env_scores",
+        "error",
+        "expected_trials_per_task",
+        "hf_commit",
+        "hf_repo_id",
+        "init_seed",
+        "miner_hotkey",
+        "per_task_scores",
+        "round_num",
+        "success",
+        "total_score",
+    ]
