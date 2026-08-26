@@ -20,6 +20,48 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.8.0 — 2026-08-26
+
+One new optional field on `Competition`: **`base_model_family`**. Additive — no
+existing field changed shape, no encoding moved, no vocabulary word was removed or
+renamed.
+
+### Miners already running: nothing to do
+
+Nothing on chain moved. `Competition` is a response shape, not a payload, and the
+new field is optional with a `None` default, so an old client that never sees it
+behaves exactly as before.
+
+### `openroboto-backend` / `openroboto-cli`: re-pin, then two follow-ups
+
+The backend already serves the field (migration `0014`); until the pin here moves
+to `0.8.0` the CLI's `Contract` base (`extra=ignore`) silently drops it on the way
+in, so **the CLI cannot see it no matter what the backend sends**. After re-pinning:
+
+- `openroboto init` must copy `base_model_family` into `miner.yaml`'s
+  `competition:` block (`commands/init.py`'s `SECTION_KEYS`). Its
+  `test_section_keys_track_the_protocol_contract` fails until it does.
+- Anything that picks a layout rule book or a format profile reads that key, not
+  the adapter string.
+
+### Why the field exists
+
+`competitions.adapter` encoded two orthogonal things in one string: the track plus
+either a base model (`sim_openpi`, `sim_lingbot`) or a piece of *hardware*
+(`real_xarm6`). Three of the four things dispatched off it follow the base model
+(layout rules, fingerprint inputs, the evaluator's loader) and one follows the
+track (ranking format). So a real-robot season had nowhere to say which model it
+runs, and "xArm 6 on π0.5" could not be written down at all.
+
+`base_model_family` is that missing dimension. `adapter` keeps its exact
+vocabulary and now decides only the ranking format; the `_openpi` / `_lingbot`
+suffixes are historical and must not be read as the base model.
+
+🔴 `None` means **not decided yet — refuse**, the opposite of the `None` on the
+five instants ("this boundary is not checked" — permission). `real/1` is `None`
+today. A consumer that defaults it to `openpi` judges a submission somebody already
+paid for by rules nobody chose for that season.
+
 ## 0.7.0 — 2026-08-25
 
 The real-robot track's contracts, plus a second base model for the simulation

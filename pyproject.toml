@@ -1,7 +1,7 @@
 [project]
 name = "openroboto-protocol"
 # 版本号**就是**契约版本（README「Versioning is a promise」），消费方钉死的是精确
-# 版本：`openroboto-protocol==0.7.0`。README 和 AGENTS.md 必须同步改 ——
+# 版本：`openroboto-protocol==0.8.0`。README 和 AGENTS.md 必须同步改 ——
 # `tests/test_version.py` 双向守着（钉版一致 + 0.x 必须写明「不承诺兼容」）：
 # `test_quoted_pin_examples_do_not_drift` 把这一行也扫进去了，所以这个例子
 # 不会再像 0.2.0 那样被落下五个版本。
@@ -12,7 +12,7 @@ name = "openroboto-protocol"
 # （0.1.0 → 0.2.0）这样收紧 schemas 的哨兵默认值是允许的。
 #
 # ⚠️ 0.1.0 已经发到 PyPI（2026-08-19，OIDC）。PyPI 版本号不可重用，只能往前发。
-version = "0.7.0"
+version = "0.8.0"
 description = "Shared protocol contract for the OpenRoboto subnet on Bittensor (netuid 80): seed derivation, commitment codec, model hashing, status vocabulary and API schemas."
 readme = "README.md"
 license = "MIT"

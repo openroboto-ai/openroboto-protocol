@@ -297,6 +297,7 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "champion_announced_at",
         "base_repo",
         "base_revision",
+        "base_model_family",
         "params",
     },
     # —— real track: one episode per request ——
@@ -1272,6 +1273,37 @@ def test_competition_base_model_is_null_or_real_never_the_empty_string() -> None
     with pytest.raises(ValidationError):
         _competition(base_revision="")
     assert _competition(base_repo="openroboto-ai/pi05-libero-pytorch").base_repo
+
+
+def test_competition_base_model_family_is_null_until_the_season_decides() -> None:
+    """🔴 `None` means "not decided yet", and it is **not** the same `None` as the
+    five instants above.
+
+    There it means "this boundary is not checked" — a configuration, read as
+    permission. Here it means the opposite: nothing has been chosen, so nothing may
+    run. `real/1` is `None` today because the xArm 6 season's base model waits on the
+    hardware. A consumer that fills in `openpi` because it has to pick something judges
+    a miner who already paid by rules nobody chose for that season.
+
+    The empty string is refused for the same reason as `base_repo`: `""` is a value
+    that flows, and "" is not a family anybody can look up.
+    """
+    assert _competition().base_model_family is None
+    assert _competition(base_model_family="openpi").base_model_family == "openpi"
+    with pytest.raises(ValidationError):
+        _competition(base_model_family="")
+
+
+def test_competition_base_model_family_is_independent_of_the_adapter() -> None:
+    """🔴 The whole point of the field: hardware and base model are orthogonal.
+
+    `real_xarm6` + `openpi` is a legal, meaningful season — "xArm 6 running π0.5" —
+    and it is exactly the combination that could not be expressed while the base model
+    was encoded in the adapter string. This asserts the schema does not quietly put
+    that back by validating one against the other.
+    """
+    c = _competition(track="real", adapter="real_xarm6", base_model_family="openpi")
+    assert (c.adapter, c.base_model_family) == ("real_xarm6", "openpi")
 
 
 def test_competition_params_are_passed_through_including_a_null_coldkey() -> None:

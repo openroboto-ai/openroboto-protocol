@@ -1895,6 +1895,14 @@ class Competition(Contract):
     #: and a `Literal` here would mean this package has to be released before the
     #: backend can serve a competition it already knows how to run. The registry that
     #: must be closed is the dispatch table in the backend, which fails closed at start.
+    #:
+    #: 🔴 **This names the track and the hardware, not the base model.** The `_openpi`
+    #: / `_lingbot` suffixes are historical: `real_xarm6` encodes a *robot arm*, and
+    #: since 2026-08-26 nothing is dispatched off this string except the ranking format
+    #: (champion-holds vs tournament). Which base model a season runs on is
+    #: `base_model_family` below. Deriving the base model from this name reads
+    #: `real_xarm6` as "no base model at all", which is how "xArm 6 on π0.5" became
+    #: impossible to express in the first place.
     adapter: str
     status: CompetitionStatus
 
@@ -1938,6 +1946,31 @@ class Competition(Contract):
     #: `Baseline.revision`, where `huggingface.co/{repo}/tree/{""}` silently lands on
     #: the default branch and therefore on whatever the weights are today.
     base_revision: Annotated[str, Field(min_length=1)] | None = None
+    #: Which base model this season is trained on top of — `openpi` (π0.5) or
+    #: `lingbot_vla`. It decides which layout rules judge a checkpoint, which files go
+    #: into the model fingerprint, and which loader the evaluator uses; the same two
+    #: strings are what the backend puts in the dispatch payload's `model_family`, so
+    #: there is deliberately **no mapping table** between this and that.
+    #:
+    #: 🔴 `None` means **this season's base model has not been decided yet**, and every
+    #: consumer must fail closed on it: refuse, do not pick a default. That is the
+    #: opposite direction from the five instants above, where `None` means "this
+    #: boundary is not checked" — the two look alike and mean opposite things. Falling
+    #: back to π0.5 here judges a paid-for submission by rules nobody chose for it.
+    #:
+    #: Left an open `str` for the same reason as `adapter`: a new base model must not
+    #: require a release of this package before the backend can serve the season. The
+    #: registry that closes is the backend's, at start-up, plus a `CHECK` on the column.
+    #:
+    #: ⚠️ **Not derivable from `base_repo`.** That answers "where are the weights",
+    #: this answers "which code loads and judges them" — one family has many repos (the
+    #: vendor's base repo and its own post-trained one, the owner's mirror of a
+    #: champion, and every miner's fork).
+    #:
+    #: `""` is refused for the same reason as `base_repo`: it is a value that flows,
+    #: and no registry has an entry for it — so it turns a loud "not decided" into a
+    #: quiet lookup miss somewhere further downstream.
+    base_model_family: Annotated[str, Field(min_length=1)] | None = None
     #: The frozen spec — fee, qualification threshold, camera count, image size…
     #: Read the class docstring before reading `params["fee"]["coldkey"]`.
     params: dict[str, Any] = Field(default_factory=dict)
