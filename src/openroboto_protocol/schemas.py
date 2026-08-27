@@ -566,7 +566,12 @@ class QueueTask(Contract):
     miner_hotkey: str
     hf_repo_id: str
     hf_commit: str
-    round_num: int
+    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
+    #: input to the seed hash, and that position now holds `competitions.id`.
+    #: Leaving a number that decides nothing and no longer matches the seed is
+    #: worse than leaving nothing: it reads as a key somebody may safely branch
+    #: on. Which season a row belongs to is answered by `competition_id`, and
+    #: only by it.
     #: The public face of the "seed derivation" red line. The worker's
     #: `select_init_seed()` reads it directly; the three below are what a miner needs to
     #: reproduce the seed derivation independently, and **not one of them may be
@@ -706,8 +711,12 @@ class ScoreSubmission(Contract):
     miner_hotkey: str | None = None
     hf_repo_id: str | None = None
     hf_commit: str | None = None
-    #: When ≤ 0 the backend falls back to the DB's `round_num`; it does not write 0.
-    round_num: int | None = None
+    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
+    #: input to the seed hash, and that position now holds `competitions.id`.
+    #: Leaving a number that decides nothing and no longer matches the seed is
+    #: worse than leaving nothing: it reads as a key somebody may safely branch
+    #: on. Which season a row belongs to is answered by `competition_id`, and
+    #: only by it.
     #: `libero` / `libero_pro` / `libero_pro_custom_1` / `libero_plus`.
     #: The worker's check is "missing is tolerable, present must match" — today the
     #: backend does not store it at all, so the check always takes the "old backend,
@@ -1047,7 +1056,12 @@ class SubmissionRecord(Contract):
     miner_hotkey: str
     hf_repo_id: str
     hf_commit: str
-    round_num: int
+    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
+    #: input to the seed hash, and that position now holds `competitions.id`.
+    #: Leaving a number that decides nothing and no longer matches the seed is
+    #: worse than leaving nothing: it reads as a key somebody may safely branch
+    #: on. Which season a row belongs to is answered by `competition_id`, and
+    #: only by it.
     #: The stored evaluation result = the body as it was at POST time. `None` when not
     #: evaluated yet (the DB holds `{}` or `""` — normalized to `null` at the exit, so
     #: the worker's check returns False, which is the **correct** result: it really was
@@ -1215,18 +1229,12 @@ class QueueStatusTask(Contract):
     hf_repo_id: str
     hf_commit: str
     submitted_at: datetime | None = None
-    #: Already selected in the SQL but not put into the live response; the contract
-    #: requires filling it in.
-    #:
-    #: ⚠️ **No default value, required.** Every task in the queue **necessarily belongs
-    #: to some round** — "we do not know which round" is not a legal state, and
-    #: `round_num=0` is even less so: round 0 does not exist, and 0 would be taken by
-    #: the frontend and by miners' curl commands as a real round to filter on, silently
-    #: fetching back an empty list. The production column is `NOT NULL`, the backend
-    #: always fills it, and in the 2026-08-19 copy 0 of 119 rows are 0 — this default
-    #: value could not fire on a single row, and keeping it would only make "forgot to
-    #: fill it in" representable.
-    round_num: int
+    #: 🔴 **No `round_num` here, removed 2026-08-27.** The comment that used to
+    #: sit here argued at length that every queued task "necessarily belongs to
+    #: some round" and that omitting it would make "forgot to fill it in"
+    #: representable. Both were true of a subnet with one season at a time. The
+    #: season a task belongs to is `competition_id`, and the seed no longer takes
+    #: a round number, so what is left here is a number nobody may branch on.
     reason: Reason | None = None
     #: The progress bar data. The contract card calls it "progress", but in history the
     #: same data is called `detail` — one thing with two names is exactly what this file
@@ -1293,7 +1301,6 @@ class SubmissionHistoryItem(Contract):
     task_id: str
     uid: int
     hotkey: str
-    round_num: int
     hf_repo_id: str
     hf_commit: str
     #: The on-chain block and the **on-chain time (Unix seconds, integer)**. The paging
@@ -1551,7 +1558,6 @@ class ScanRejection(Contract):
 
     uid: int
     hotkey: str
-    round_num: int
     hf_commit: str
     hf_repo_id: str
     commit_block: int

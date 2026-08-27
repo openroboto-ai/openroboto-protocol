@@ -20,6 +20,46 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.9.0 — 2026-08-27
+
+**`round_num` is removed from six response models.** Breaking, on purpose, and the
+on-chain encoding does not move: `commitment.py` is untouched and all 149 golden
+vectors are green.
+
+Gone from `QueueTask` · `ScoreSubmission` · `SubmissionRecord` · `QueueStatusTask` ·
+`SubmissionHistoryItem` · `ScanRejection`.
+**Still there on `LeaderboardRow`** — see below.
+
+### Miners already running: nothing to do
+
+Nothing on chain moved. The commitment payload still carries `r`; what changed is
+that the backend no longer reads it for anything. `derive_seed` keeps its
+signature — only the *name* of its second parameter is the season now, and for
+every submission made so far that parameter has the same value it always had.
+
+### The evaluation worker: one key disappears from two payloads
+
+`GET /api/v1/benchmark/queue` no longer sends `round_num`, and
+`POST .../task/{id}/score` no longer declares it. A worker that still sends it is
+**not** rejected — `ScoreSubmission` keeps pydantic's `extra=ignore`, and the value
+lands in the stored result like any other unknown key. A worker that *reads* it off
+a queued task will get a `KeyError`; there is nothing to read it for, since which
+season a task belongs to is `competition_id` and nothing else.
+
+### External validators: `/api/rank` is unchanged
+
+`LeaderboardRow.round_num` **stays**. That row is what `/api/rank` returns, and on
+2026-08-18 twelve distinct IPs pulled it whose owners we have not identified. The
+argument for deleting the other six — "a number nobody may branch on is worse than
+no number" — does not reach a field we cannot see the consumers of.
+
+### Why now
+
+It used to be the second input to the seed hash, so it decided which LIBERO tasks a
+submission was scored on. That input is `competitions.id` as of 2026-08-27, and a
+number that no longer matches the seed, participates in no dispatch, and keys no
+lookup is not a harmless leftover: it reads as something safe to branch on.
+
 ## 0.8.0 — 2026-08-26
 
 One new optional field on `Competition`: **`base_model_family`**. Additive — no

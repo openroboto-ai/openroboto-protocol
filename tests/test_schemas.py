@@ -74,7 +74,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "miner_hotkey",
         "hf_repo_id",
         "hf_commit",
-        "round_num",
         "seed",
         "block_hash",
         "drand_random",
@@ -104,7 +103,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "miner_hotkey",
         "hf_repo_id",
         "hf_commit",
-        "round_num",
         "benchmark",
         "init_seed",
         "expected_trials_per_task",
@@ -122,7 +120,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "miner_hotkey",
         "hf_repo_id",
         "hf_commit",
-        "round_num",
         "result",
         "reason",
     },
@@ -159,7 +156,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "hf_repo_id",
         "hf_commit",
         "submitted_at",
-        "round_num",
         "reason",
         "stage",
         "detail",
@@ -172,7 +168,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "task_id",
         "uid",
         "hotkey",
-        "round_num",
         "hf_repo_id",
         "hf_commit",
         "commit_block",
@@ -225,7 +220,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.ScanRejection: {
         "uid",
         "hotkey",
-        "round_num",
         "hf_commit",
         "hf_repo_id",
         "commit_block",
@@ -243,6 +237,8 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.LeaderboardAudit: {"score_json_url", "logs_url", "env_hash"},
     s.LeaderboardRow: {
         "rank",
+        # 🔴 **这一个留着。** 它是 `/api/rank` 的对外字段，08-18 实测 12 个
+        # 不同 IP 在打，身份未核实 —— 和评测方那几个不是一回事。
         "round_num",
         "submission_id",
         "miner_uid",
@@ -1347,25 +1343,6 @@ def test_competition_track_is_the_commitment_vocabulary() -> None:
         _competition(track="banana")
 
 
-def test_queue_task_round_num_cannot_be_omitted() -> None:
-    """The `round_num` of a queue row is **required** — "which round is unknown"
-    is not a legal state.
-
-    This one is the opposite of the previous few: it should not have a `None`
-    default, it should have no default at all. There is no round 0, and `0` would
-    be taken as a real round number by the frontend and by a miner's curl and
-    used as a filter, silently fetching back an empty list. The production column
-    is `NOT NULL`, the backend always fills it, and 0 of the 119 rows are 0.
-    """
-    assert _queue_status_task().round_num == 1
-    with pytest.raises(ValidationError):
-        _queue_status_task(round_num=None)
-    assert s.QueueStatusTask.model_fields["round_num"].is_required()
-
-
-# --- probes ---
-
-
 def test_liveness_status_is_a_constant() -> None:
     """The `status` of `/healthz` is always `"ok"`; any other value is
     unrepresentable."""
@@ -1991,7 +1968,6 @@ def test_score_submission_untouched() -> None:
         "init_seed",
         "miner_hotkey",
         "per_task_scores",
-        "round_num",
         "success",
         "total_score",
     ]
