@@ -566,7 +566,12 @@ class QueueTask(Contract):
     miner_hotkey: str
     hf_repo_id: str
     hf_commit: str
-    round_num: int
+    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
+    #: input to the seed hash, and that position now holds `competitions.id`.
+    #: Leaving a number that decides nothing and no longer matches the seed is
+    #: worse than leaving nothing: it reads as a key somebody may safely branch
+    #: on. Which season a row belongs to is answered by `competition_id`, and
+    #: only by it.
     #: The public face of the "seed derivation" red line. The worker's
     #: `select_init_seed()` reads it directly; the three below are what a miner needs to
     #: reproduce the seed derivation independently, and **not one of them may be
@@ -706,8 +711,12 @@ class ScoreSubmission(Contract):
     miner_hotkey: str | None = None
     hf_repo_id: str | None = None
     hf_commit: str | None = None
-    #: When ≤ 0 the backend falls back to the DB's `round_num`; it does not write 0.
-    round_num: int | None = None
+    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
+    #: input to the seed hash, and that position now holds `competitions.id`.
+    #: Leaving a number that decides nothing and no longer matches the seed is
+    #: worse than leaving nothing: it reads as a key somebody may safely branch
+    #: on. Which season a row belongs to is answered by `competition_id`, and
+    #: only by it.
     #: `libero` / `libero_pro` / `libero_pro_custom_1` / `libero_plus`.
     #: The worker's check is "missing is tolerable, present must match" — today the
     #: backend does not store it at all, so the check always takes the "old backend,
@@ -835,7 +844,12 @@ def check_required_envs(env_scores: object) -> None:
 #: The canonical public stage words. **Same source as `status.ALL_STAGES`**;
 #: `tests/test_schemas.py` pins the two to be equal — this module must not have a second
 #: stage vocabulary.
-EvalStage = Literal["claimed", "downloading", "prechecking", "running"]
+#: ⚠️ The last two are **exits, not steps**: the worker has let go of the task.
+#: `queued` = handed back, someone will pick it up. `stalled` = stopped retrying,
+#: waiting for a human. Neither decides anything about the model — see `status.py`.
+EvalStage = Literal[
+    "claimed", "downloading", "prechecking", "running", "queued", "stalled"
+]
 
 #: The keys that may show up in the progress detail a worker reports. The frontend's
 #: `QueueProgressDetail` (`web/src/api/types.ts`) draws the progress bar from exactly
@@ -1047,7 +1061,12 @@ class SubmissionRecord(Contract):
     miner_hotkey: str
     hf_repo_id: str
     hf_commit: str
-    round_num: int
+    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
+    #: input to the seed hash, and that position now holds `competitions.id`.
+    #: Leaving a number that decides nothing and no longer matches the seed is
+    #: worse than leaving nothing: it reads as a key somebody may safely branch
+    #: on. Which season a row belongs to is answered by `competition_id`, and
+    #: only by it.
     #: The stored evaluation result = the body as it was at POST time. `None` when not
     #: evaluated yet (the DB holds `{}` or `""` — normalized to `null` at the exit, so
     #: the worker's check returns False, which is the **correct** result: it really was
@@ -1215,23 +1234,41 @@ class QueueStatusTask(Contract):
     hf_repo_id: str
     hf_commit: str
     submitted_at: datetime | None = None
-    #: Already selected in the SQL but not put into the live response; the contract
-    #: requires filling it in.
-    #:
-    #: ⚠️ **No default value, required.** Every task in the queue **necessarily belongs
-    #: to some round** — "we do not know which round" is not a legal state, and
-    #: `round_num=0` is even less so: round 0 does not exist, and 0 would be taken by
-    #: the frontend and by miners' curl commands as a real round to filter on, silently
-    #: fetching back an empty list. The production column is `NOT NULL`, the backend
-    #: always fills it, and in the 2026-08-19 copy 0 of 119 rows are 0 — this default
-    #: value could not fire on a single row, and keeping it would only make "forgot to
-    #: fill it in" representable.
-    round_num: int
+    #: 🔴 **No `round_num` here, removed 2026-08-27.** The comment that used to
+    #: sit here argued at length that every queued task "necessarily belongs to
+    #: some round" and that omitting it would make "forgot to fill it in"
+    #: representable. Both were true of a subnet with one season at a time. The
+    #: season a task belongs to is `competition_id`, and the seed no longer takes
+    #: a round number, so what is left here is a number nobody may branch on.
     reason: Reason | None = None
     #: The progress bar data. The contract card calls it "progress", but in history the
     #: same data is called `detail` — one thing with two names is exactly what this file
     #: exists to eliminate, so it is uniformly called `detail`.
     stage: str | None = None
+    #: How long this `stage` has gone without moving, in seconds. **Only present on
+    #: `evaluating` rows**; `null` everywhere else.
+    #:
+    #: 🔴 **A stage does not expire on its own, so a reader cannot tell whether to
+    #: believe it.** On 2026-09-01 a GPU worker died right after reporting
+    #: `benchmark_prechecking` and then restarted every two minutes without ever
+    #: reporting again. The public queue kept showing "prechecking" for hours, for a
+    #: precheck that no longer existed. From outside, "currently prechecking" and "died
+    #: at prechecking" were the same pixels, and two miners who had already burned TAO
+    #: sat there unable to tell the difference.
+    #:
+    #: Note this is **an age, not a verdict**: the backend does not conclude anything
+    #: from it, and a stale stage is not a failed task. Whoever fixes the worker decides
+    #: what the failure is; this only stops the page from asserting a freshness it
+    #: cannot vouch for.
+    stage_age_seconds: int | None = None
+    #: Whether `stage_age_seconds` has passed the backend's threshold.
+    #:
+    #: ⚠️ **The threshold lives on the server, deliberately.** Handing out only the
+    #: seconds and letting each client decide means two clients call the same task stuck
+    #: at two different moments — and the one that has to explain itself to a miner is
+    #: whichever one is on screen. Clients use the boolean to grey the row out and the
+    #: seconds to say "last updated 3 hours ago".
+    stage_stale: bool = False
     detail: dict[str, Any] | None = None
     #: ⚠️ The two below **only appear when `eval_status == "pending"`, and as a "missing
     #: key" rather than as `null`** (measured live; the frontend's `types.ts:146` is
@@ -1293,7 +1330,6 @@ class SubmissionHistoryItem(Contract):
     task_id: str
     uid: int
     hotkey: str
-    round_num: int
     hf_repo_id: str
     hf_commit: str
     #: The on-chain block and the **on-chain time (Unix seconds, integer)**. The paging
@@ -1551,7 +1587,6 @@ class ScanRejection(Contract):
 
     uid: int
     hotkey: str
-    round_num: int
     hf_commit: str
     hf_repo_id: str
     commit_block: int
@@ -1895,6 +1930,14 @@ class Competition(Contract):
     #: and a `Literal` here would mean this package has to be released before the
     #: backend can serve a competition it already knows how to run. The registry that
     #: must be closed is the dispatch table in the backend, which fails closed at start.
+    #:
+    #: 🔴 **This names the track and the hardware, not the base model.** The `_openpi`
+    #: / `_lingbot` suffixes are historical: `real_xarm6` encodes a *robot arm*, and
+    #: since 2026-08-26 nothing is dispatched off this string except the ranking format
+    #: (champion-holds vs tournament). Which base model a season runs on is
+    #: `base_model_family` below. Deriving the base model from this name reads
+    #: `real_xarm6` as "no base model at all", which is how "xArm 6 on π0.5" became
+    #: impossible to express in the first place.
     adapter: str
     status: CompetitionStatus
 
@@ -1938,6 +1981,31 @@ class Competition(Contract):
     #: `Baseline.revision`, where `huggingface.co/{repo}/tree/{""}` silently lands on
     #: the default branch and therefore on whatever the weights are today.
     base_revision: Annotated[str, Field(min_length=1)] | None = None
+    #: Which base model this season is trained on top of — `openpi` (π0.5) or
+    #: `lingbot_vla`. It decides which layout rules judge a checkpoint, which files go
+    #: into the model fingerprint, and which loader the evaluator uses; the same two
+    #: strings are what the backend puts in the dispatch payload's `model_family`, so
+    #: there is deliberately **no mapping table** between this and that.
+    #:
+    #: 🔴 `None` means **this season's base model has not been decided yet**, and every
+    #: consumer must fail closed on it: refuse, do not pick a default. That is the
+    #: opposite direction from the five instants above, where `None` means "this
+    #: boundary is not checked" — the two look alike and mean opposite things. Falling
+    #: back to π0.5 here judges a paid-for submission by rules nobody chose for it.
+    #:
+    #: Left an open `str` for the same reason as `adapter`: a new base model must not
+    #: require a release of this package before the backend can serve the season. The
+    #: registry that closes is the backend's, at start-up, plus a `CHECK` on the column.
+    #:
+    #: ⚠️ **Not derivable from `base_repo`.** That answers "where are the weights",
+    #: this answers "which code loads and judges them" — one family has many repos (the
+    #: vendor's base repo and its own post-trained one, the owner's mirror of a
+    #: champion, and every miner's fork).
+    #:
+    #: `""` is refused for the same reason as `base_repo`: it is a value that flows,
+    #: and no registry has an entry for it — so it turns a loud "not decided" into a
+    #: quiet lookup miss somewhere further downstream.
+    base_model_family: Annotated[str, Field(min_length=1)] | None = None
     #: The frozen spec — fee, qualification threshold, camera count, image size…
     #: Read the class docstring before reading `params["fee"]["coldkey"]`.
     params: dict[str, Any] = Field(default_factory=dict)

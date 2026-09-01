@@ -74,7 +74,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "miner_hotkey",
         "hf_repo_id",
         "hf_commit",
-        "round_num",
         "seed",
         "block_hash",
         "drand_random",
@@ -104,7 +103,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "miner_hotkey",
         "hf_repo_id",
         "hf_commit",
-        "round_num",
         "benchmark",
         "init_seed",
         "expected_trials_per_task",
@@ -122,7 +120,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "miner_hotkey",
         "hf_repo_id",
         "hf_commit",
-        "round_num",
         "result",
         "reason",
     },
@@ -159,9 +156,10 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "hf_repo_id",
         "hf_commit",
         "submitted_at",
-        "round_num",
         "reason",
         "stage",
+        "stage_age_seconds",
+        "stage_stale",
         "detail",
         "queue_position",
         "evaltime",
@@ -172,7 +170,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "task_id",
         "uid",
         "hotkey",
-        "round_num",
         "hf_repo_id",
         "hf_commit",
         "commit_block",
@@ -225,7 +222,6 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.ScanRejection: {
         "uid",
         "hotkey",
-        "round_num",
         "hf_commit",
         "hf_repo_id",
         "commit_block",
@@ -243,6 +239,8 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.LeaderboardAudit: {"score_json_url", "logs_url", "env_hash"},
     s.LeaderboardRow: {
         "rank",
+        # 🔴 **这一个留着。** 它是 `/api/rank` 的对外字段，08-18 实测 12 个
+        # 不同 IP 在打，身份未核实 —— 和评测方那几个不是一回事。
         "round_num",
         "submission_id",
         "miner_uid",
@@ -297,6 +295,7 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "champion_announced_at",
         "base_repo",
         "base_revision",
+        "base_model_family",
         "params",
     },
     # —— real track: one episode per request ——
@@ -1123,6 +1122,33 @@ def _queue_status_task(**overrides: Any) -> s.QueueStatusTask:
     return s.QueueStatusTask.model_validate(payload)
 
 
+def test_a_task_with_no_stage_age_is_not_reported_as_stale() -> None:
+    """🔴 "We do not know how old this stage is" must not read as "it is stuck".
+
+    `stage_age_seconds` is `None` on every row that is not `evaluating`, and that is
+    most rows. If the absence defaulted to stale, every queued and every finished task
+    would render greyed out, and the one signal that means something would mean
+    nothing.
+    """
+    task = _queue_status_task()
+    assert task.stage_age_seconds is None
+    assert task.stage_stale is False
+
+
+def test_stage_age_and_staleness_are_independent_fields() -> None:
+    """The age is a measurement; the staleness is the server's call on that measurement.
+
+    They are carried separately so a client can show "last updated 3 hours ago" without
+    having to know — or guess — the threshold that decides when three hours is too long.
+    A client that recomputes staleness from the seconds has forked the threshold, which
+    is the thing carrying it on the wire is meant to prevent.
+    """
+    fresh = _queue_status_task(stage_age_seconds=30, stage_stale=False)
+    stuck = _queue_status_task(stage_age_seconds=30, stage_stale=True)
+    assert fresh.stage_age_seconds == stuck.stage_age_seconds
+    assert fresh.stage_stale != stuck.stage_stale
+
+
 def _history_item(**overrides: Any) -> s.SubmissionHistoryItem:
     payload: dict[str, Any] = {
         "id": 1,
@@ -1274,6 +1300,37 @@ def test_competition_base_model_is_null_or_real_never_the_empty_string() -> None
     assert _competition(base_repo="openroboto-ai/pi05-libero-pytorch").base_repo
 
 
+def test_competition_base_model_family_is_null_until_the_season_decides() -> None:
+    """🔴 `None` means "not decided yet", and it is **not** the same `None` as the
+    five instants above.
+
+    There it means "this boundary is not checked" — a configuration, read as
+    permission. Here it means the opposite: nothing has been chosen, so nothing may
+    run. `real/1` is `None` today because the xArm 6 season's base model waits on the
+    hardware. A consumer that fills in `openpi` because it has to pick something judges
+    a miner who already paid by rules nobody chose for that season.
+
+    The empty string is refused for the same reason as `base_repo`: `""` is a value
+    that flows, and "" is not a family anybody can look up.
+    """
+    assert _competition().base_model_family is None
+    assert _competition(base_model_family="openpi").base_model_family == "openpi"
+    with pytest.raises(ValidationError):
+        _competition(base_model_family="")
+
+
+def test_competition_base_model_family_is_independent_of_the_adapter() -> None:
+    """🔴 The whole point of the field: hardware and base model are orthogonal.
+
+    `real_xarm6` + `openpi` is a legal, meaningful season — "xArm 6 running π0.5" —
+    and it is exactly the combination that could not be expressed while the base model
+    was encoded in the adapter string. This asserts the schema does not quietly put
+    that back by validating one against the other.
+    """
+    c = _competition(track="real", adapter="real_xarm6", base_model_family="openpi")
+    assert (c.adapter, c.base_model_family) == ("real_xarm6", "openpi")
+
+
 def test_competition_params_are_passed_through_including_a_null_coldkey() -> None:
     """`params` is handed over verbatim, `null`s included.
 
@@ -1313,25 +1370,6 @@ def test_competition_track_is_the_commitment_vocabulary() -> None:
     assert _competition().model_dump(mode="json")["track"] == "sim"
     with pytest.raises(ValidationError):
         _competition(track="banana")
-
-
-def test_queue_task_round_num_cannot_be_omitted() -> None:
-    """The `round_num` of a queue row is **required** — "which round is unknown"
-    is not a legal state.
-
-    This one is the opposite of the previous few: it should not have a `None`
-    default, it should have no default at all. There is no round 0, and `0` would
-    be taken as a real round number by the frontend and by a miner's curl and
-    used as a filter, silently fetching back an empty list. The production column
-    is `NOT NULL`, the backend always fills it, and 0 of the 119 rows are 0.
-    """
-    assert _queue_status_task().round_num == 1
-    with pytest.raises(ValidationError):
-        _queue_status_task(round_num=None)
-    assert s.QueueStatusTask.model_fields["round_num"].is_required()
-
-
-# --- probes ---
 
 
 def test_liveness_status_is_a_constant() -> None:
@@ -1959,7 +1997,6 @@ def test_score_submission_untouched() -> None:
         "init_seed",
         "miner_hotkey",
         "per_task_scores",
-        "round_num",
         "success",
         "total_score",
     ]

@@ -281,7 +281,18 @@ def test_wire_stage_vocabulary_matches_production() -> None:
     **evaluating has never appeared** — the canonical outward word is running,
     and this is the basis for settling the four-party vocabulary dispute.
     """
-    assert S.ALL_STAGES == {"downloading", "prechecking", "running", "claimed"}
+    assert S.ALL_STAGES == {
+        "downloading",
+        "prechecking",
+        "running",
+        "claimed",
+        # 2026-09-01. Not observed in production storage either — they are added
+        # for the same reason `claimed` was: the entry point must accept what the
+        # worker is about to send, or the first report is a 400 and the retry that
+        # follows is silent.
+        "queued",
+        "stalled",
+    }
     assert "evaluating" not in S.ALL_STAGES
 
 
@@ -341,17 +352,30 @@ def test_stage_stored_form_is_the_prefixed_one() -> None:
         "benchmark_downloading",
         "benchmark_prechecking",
         "benchmark_running",
+        # 🔴 **No prefix on these two, on purpose.** `benchmark_` marks "the
+        # benchmark is doing something with this row"; both of these mean the
+        # opposite — the worker has let go. Prefixing them would make
+        # `stage.startswith("benchmark_")` — a shape that reads naturally and
+        # will get written — mean the reverse of what it says.
+        "queued",
+        "stalled",
     ]
 
 
 def test_stage_order_is_the_worker_execution_order() -> None:
     # `claimed` (task taken, download not started yet) comes first — the order is
     # the worker's actual execution order.
+    #
+    # ⚠️ Only the first four are a progression. `queued` and `stalled` are exits
+    # reachable from any of them, so they sit after the sequence rather than in
+    # it; reading the tuple as "these six happen in order" would be wrong.
     assert [s.wire for s in S.STAGES] == [
         "claimed",
         "downloading",
         "prechecking",
         "running",
+        "queued",
+        "stalled",
     ]
 
 
@@ -511,3 +535,33 @@ def test_module_exports_are_pinned() -> None:
         "normalize_status",
     ]
     assert all(hasattr(S, name) for name in S.__all__)
+
+
+def test_the_two_exit_stages_are_not_verdicts() -> None:
+    """🔴 `queued` and `stalled` say what the **worker** did, not what the model is.
+
+    They were added on 2026-09-01 after two paid miners sat at `prechecking` for
+    four hours while the worker crash-looped every two minutes. The tempting fix
+    was "after N retries, mark it eval_failed" — and that is wrong, because N
+    failures on one machine is evidence about *that machine*. Infrastructure
+    crashing is our fault and the fee is already burned; a verdict there spends
+    someone's TAO on a conclusion nobody reached.
+
+    So neither word may leak into the status vocabulary, where the terminal
+    decisions live. This test is what makes that separation cost something to
+    undo.
+    """
+    assert S.STAGE_QUEUED not in S.ALL_STATUSES
+    assert S.STAGE_STALLED not in S.ALL_STATUSES
+    assert not S.is_terminal(S.STATUS_PENDING)
+
+
+def test_a_stalled_task_is_still_pending() -> None:
+    """A worker that gives up does not move the row out of the queue.
+
+    `stalled` is a *display* fact — "nobody is working on this and nobody will
+    until a human looks". The row stays `pending`, so any fix that starts
+    dispatching again picks it up with no migration and no repair script.
+    """
+    assert S.STAGE_STALLED in S.ALL_STAGES
+    assert S.STATUS_PENDING in S.ALL_STATUSES

@@ -20,6 +20,140 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.10.0 — 2026-09-01
+
+### 新增两个 stage：`queued` / `stalled`
+
+worker 交还任务时说得出话了。此前 `stage` 的四个词全是「正在做什么」，
+没有一个能表达「我放手了」—— 于是评测重试路径（`_schedule_clean_retry`）
+清完缓存、本地塞回队尾，**一个字都不上报**。
+
+2026-09-01 的代价：两个**已付费**的矿工任务在队列里显示 `prechecking` 挂了
+4 个多小时，而 worker 每 2 分钟崩一轮、白烧 GPU。从外面看，这和「正在正常评测」
+一模一样 —— `stage` 是唯一能说出真相的字段，而它没有那个词。
+
+| | 含义 | 存储形态 |
+|---|---|---|
+| `queued` | 交还了，等人再领 | `queued`（**无前缀**）|
+| `stalled` | 不再重试，等人来看 | `stalled`（**无前缀**）|
+
+🔴 **两个都不是判决。** 它们说的是 worker 干了什么，不是模型怎么样。
+尤其 `stalled` **不许写成 `eval_failed`**：一台机器上失败 N 次是关于**那台机器**的
+证据，而基建崩了是我们的锅、矿工的费已经烧了 —— 判下去等于拿没人得出的结论花别人的钱。
+
+⚠️ **这两个不带 `benchmark_` 前缀**，和上面四个不同。那个前缀标的是
+「评测正在处理这一行」，而这两个的意思正相反。给它们加前缀会让
+`stage.startswith("benchmark_")`（一个读起来很自然、迟早有人写的判断）
+表达出与字面相反的意思。
+
+⚠️ 顺序上它们排在四个进行态**之后**，但**不是第五、第六步** —— 是从任何一步
+都可能到达的出口。把 `STAGES` 读成「这六件事按顺序发生」是错的。
+
+### `QueueStatusTask` 多两个字段：`stage_age_seconds` / `stage_stale`
+
+**上面那两个词治的是「worker 说得出话」，这两个字段治的是「worker 什么都不说」。**
+后者才是 09-01 真正发生的事：进程在报完 `prechecking` 之后整个死掉，
+此后没有任何一次上报 —— 再多的词表也救不了一个不再说话的客户端，
+只有我们这边能凭「很久没心跳」把那一格降级。
+
+- `stage_age_seconds`：这个 `stage` 有多久没动过。**只有 `evaluating` 行有**，
+  其余是 `null`（终态行的 `stage` 停在那儿是对的，给它算一个越来越大的数字，
+  等于把「已经结束」显示成「越卡越久」）。
+- `stage_stale`：上面那个数越过后端阈值就是 `true`。
+
+🔴 **两个都不是判决**，同上面那条。陈旧的 `stage` 不等于任务失败 ——
+后端不据此改任何状态，它只是不再替一个自己无法核实的字段担保新鲜度。
+
+⚠️ **阈值留在服务端，故意的。** 只发秒数、让每个客户端自己判，结果是两个页面
+在不同时刻说同一条任务卡住了，而要向矿工解释的是当时显示着的那一个。
+
+**谁要动**：`openroboto-backend` 升到 0.10.0 之后这两个字段才存在，
+不升就是契约快照对不上（`test_task_key_set_matches_the_contract`）。
+前端拿布尔值置灰、拿秒数显示「N 分钟前更新」。
+**矿工和外部验证者：无事**，两个字段都是新增且可选。
+
+## 0.9.0 — 2026-08-27
+
+**`round_num` is removed from six response models.** Breaking, on purpose, and the
+on-chain encoding does not move: `commitment.py` is untouched and all 149 golden
+vectors are green.
+
+Gone from `QueueTask` · `ScoreSubmission` · `SubmissionRecord` · `QueueStatusTask` ·
+`SubmissionHistoryItem` · `ScanRejection`.
+**Still there on `LeaderboardRow`** — see below.
+
+### Miners already running: nothing to do
+
+Nothing on chain moved. The commitment payload still carries `r`; what changed is
+that the backend no longer reads it for anything. `derive_seed` keeps its
+signature — only the *name* of its second parameter is the season now, and for
+every submission made so far that parameter has the same value it always had.
+
+### The evaluation worker: one key disappears from two payloads
+
+`GET /api/v1/benchmark/queue` no longer sends `round_num`, and
+`POST .../task/{id}/score` no longer declares it. A worker that still sends it is
+**not** rejected — `ScoreSubmission` keeps pydantic's `extra=ignore`, and the value
+lands in the stored result like any other unknown key. A worker that *reads* it off
+a queued task will get a `KeyError`; there is nothing to read it for, since which
+season a task belongs to is `competition_id` and nothing else.
+
+### External validators: `/api/rank` is unchanged
+
+`LeaderboardRow.round_num` **stays**. That row is what `/api/rank` returns, and on
+2026-08-18 twelve distinct IPs pulled it whose owners we have not identified. The
+argument for deleting the other six — "a number nobody may branch on is worse than
+no number" — does not reach a field we cannot see the consumers of.
+
+### Why now
+
+It used to be the second input to the seed hash, so it decided which LIBERO tasks a
+submission was scored on. That input is `competitions.id` as of 2026-08-27, and a
+number that no longer matches the seed, participates in no dispatch, and keys no
+lookup is not a harmless leftover: it reads as something safe to branch on.
+
+## 0.8.0 — 2026-08-26
+
+One new optional field on `Competition`: **`base_model_family`**. Additive — no
+existing field changed shape, no encoding moved, no vocabulary word was removed or
+renamed.
+
+### Miners already running: nothing to do
+
+Nothing on chain moved. `Competition` is a response shape, not a payload, and the
+new field is optional with a `None` default, so an old client that never sees it
+behaves exactly as before.
+
+### `openroboto-backend` / `openroboto-cli`: re-pin, then two follow-ups
+
+The backend already serves the field (migration `0014`); until the pin here moves
+to `0.8.0` the CLI's `Contract` base (`extra=ignore`) silently drops it on the way
+in, so **the CLI cannot see it no matter what the backend sends**. After re-pinning:
+
+- `openroboto init` must copy `base_model_family` into `miner.yaml`'s
+  `competition:` block (`commands/init.py`'s `SECTION_KEYS`). Its
+  `test_section_keys_track_the_protocol_contract` fails until it does.
+- Anything that picks a layout rule book or a format profile reads that key, not
+  the adapter string.
+
+### Why the field exists
+
+`competitions.adapter` encoded two orthogonal things in one string: the track plus
+either a base model (`sim_openpi`, `sim_lingbot`) or a piece of *hardware*
+(`real_xarm6`). Three of the four things dispatched off it follow the base model
+(layout rules, fingerprint inputs, the evaluator's loader) and one follows the
+track (ranking format). So a real-robot season had nowhere to say which model it
+runs, and "xArm 6 on π0.5" could not be written down at all.
+
+`base_model_family` is that missing dimension. `adapter` keeps its exact
+vocabulary and now decides only the ranking format; the `_openpi` / `_lingbot`
+suffixes are historical and must not be read as the base model.
+
+🔴 `None` means **not decided yet — refuse**, the opposite of the `None` on the
+five instants ("this boundary is not checked" — permission). `real/1` is `None`
+today. A consumer that defaults it to `openpi` judges a submission somebody already
+paid for by rules nobody chose for that season.
+
 ## 0.7.0 — 2026-08-25
 
 The real-robot track's contracts, plus a second base model for the simulation
