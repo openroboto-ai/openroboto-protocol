@@ -20,6 +20,35 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.10.0 — 2026-09-01
+
+### 新增两个 stage：`queued` / `stalled`
+
+worker 交还任务时说得出话了。此前 `stage` 的四个词全是「正在做什么」，
+没有一个能表达「我放手了」—— 于是评测重试路径（`_schedule_clean_retry`）
+清完缓存、本地塞回队尾，**一个字都不上报**。
+
+2026-09-01 的代价：两个**已付费**的矿工任务在队列里显示 `prechecking` 挂了
+4 个多小时，而 worker 每 2 分钟崩一轮、白烧 GPU。从外面看，这和「正在正常评测」
+一模一样 —— `stage` 是唯一能说出真相的字段，而它没有那个词。
+
+| | 含义 | 存储形态 |
+|---|---|---|
+| `queued` | 交还了，等人再领 | `queued`（**无前缀**）|
+| `stalled` | 不再重试，等人来看 | `stalled`（**无前缀**）|
+
+🔴 **两个都不是判决。** 它们说的是 worker 干了什么，不是模型怎么样。
+尤其 `stalled` **不许写成 `eval_failed`**：一台机器上失败 N 次是关于**那台机器**的
+证据，而基建崩了是我们的锅、矿工的费已经烧了 —— 判下去等于拿没人得出的结论花别人的钱。
+
+⚠️ **这两个不带 `benchmark_` 前缀**，和上面四个不同。那个前缀标的是
+「评测正在处理这一行」，而这两个的意思正相反。给它们加前缀会让
+`stage.startswith("benchmark_")`（一个读起来很自然、迟早有人写的判断）
+表达出与字面相反的意思。
+
+⚠️ 顺序上它们排在四个进行态**之后**，但**不是第五、第六步** —— 是从任何一步
+都可能到达的出口。把 `STAGES` 读成「这六件事按顺序发生」是错的。
+
 ## 0.9.0 — 2026-08-27
 
 **`round_num` is removed from six response models.** Breaking, on purpose, and the

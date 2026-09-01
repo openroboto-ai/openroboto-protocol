@@ -844,7 +844,12 @@ def check_required_envs(env_scores: object) -> None:
 #: The canonical public stage words. **Same source as `status.ALL_STAGES`**;
 #: `tests/test_schemas.py` pins the two to be equal — this module must not have a second
 #: stage vocabulary.
-EvalStage = Literal["claimed", "downloading", "prechecking", "running"]
+#: ⚠️ The last two are **exits, not steps**: the worker has let go of the task.
+#: `queued` = handed back, someone will pick it up. `stalled` = stopped retrying,
+#: waiting for a human. Neither decides anything about the model — see `status.py`.
+EvalStage = Literal[
+    "claimed", "downloading", "prechecking", "running", "queued", "stalled"
+]
 
 #: The keys that may show up in the progress detail a worker reports. The frontend's
 #: `QueueProgressDetail` (`web/src/api/types.ts`) draws the progress bar from exactly

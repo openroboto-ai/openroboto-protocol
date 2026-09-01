@@ -356,6 +356,32 @@ STAGE_PRECHECKING: Final[str] = "prechecking"
 STAGE_RUNNING: Final[str] = "running"
 STAGE_CLAIMED: Final[str] = "claimed"
 
+#: The worker gave the task back without finishing it. Added 2026-09-01.
+#:
+#: 🔴 This exists because its absence was silent. The worker's evaluation retry path
+#: (`_schedule_clean_retry`) cleared its caches and re-queued locally **without telling
+#: the backend anything** — no report, no attempt counter, no backoff. On 2026-09-01 two
+#: paid miners sat at `prechecking` for four hours while the worker crash-looped every
+#: two minutes, and from the outside that is indistinguishable from a healthy
+#: evaluation. `stage` is the only field that could have said otherwise, and it had no
+#: word for "I put it back".
+#:
+#: ⚠️ This is **not** a failure verdict. The task returns to the queue and someone will
+#: pick it up again; nothing about the miner's model has been decided.
+STAGE_QUEUED: Final[str] = "queued"
+
+#: The worker has given up retrying and is waiting for a human. Added 2026-09-01.
+#:
+#: 🔴 **Deliberately not `eval_failed`.** N consecutive failures on one machine is
+#: evidence about *that machine*, not about the model — infrastructure crashing is our
+#: fault, and the miner's fee is already burned. Marking it failed spends their TAO on a
+#: conclusion nobody reached. The discriminator that would justify a verdict is "it
+#: fails where others succeed", which needs dispatch history across machines that the
+#: backend does not keep today.
+#:
+#: So this word means exactly: stopped trying, nothing decided, come look.
+STAGE_STALLED: Final[str] = "stalled"
+
 #: The stage vocabulary. The order is the worker's actual execution order.
 STAGES: Final[tuple[Stage, ...]] = (
     # `claimed` = the worker took the task but has not started downloading, so it comes
@@ -391,6 +417,13 @@ STAGES: Final[tuple[Stage, ...]] = (
     # The worker-side `_PROGRESS_STAGE_MAP` is doing exactly this translation and can be
     # deleted once it depends on this package.
     Stage(wire=STAGE_RUNNING, stored="benchmark_running", aliases=("evaluating",)),
+    # ⚠️ These two carry **no** `benchmark_` prefix, unlike the four above. That prefix
+    # marks "the benchmark is doing something with this row"; both of these mean the
+    # opposite — the worker has let go. Giving them the prefix would make
+    # `stage.startswith("benchmark_")` (a shape that reads naturally and will get
+    # written) mean the reverse of what it says.
+    Stage(wire=STAGE_QUEUED, stored=STAGE_QUEUED),
+    Stage(wire=STAGE_STALLED, stored=STAGE_STALLED),
 )
 
 #: Every legal stage word (in canonical public form). Same source as STAGES.
