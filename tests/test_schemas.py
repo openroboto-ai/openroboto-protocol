@@ -158,6 +158,8 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "submitted_at",
         "reason",
         "stage",
+        "stage_age_seconds",
+        "stage_stale",
         "detail",
         "queue_position",
         "evaltime",
@@ -1118,6 +1120,33 @@ def _queue_status_task(**overrides: Any) -> s.QueueStatusTask:
     }
     payload.update(overrides)
     return s.QueueStatusTask.model_validate(payload)
+
+
+def test_a_task_with_no_stage_age_is_not_reported_as_stale() -> None:
+    """🔴 "We do not know how old this stage is" must not read as "it is stuck".
+
+    `stage_age_seconds` is `None` on every row that is not `evaluating`, and that is
+    most rows. If the absence defaulted to stale, every queued and every finished task
+    would render greyed out, and the one signal that means something would mean
+    nothing.
+    """
+    task = _queue_status_task()
+    assert task.stage_age_seconds is None
+    assert task.stage_stale is False
+
+
+def test_stage_age_and_staleness_are_independent_fields() -> None:
+    """The age is a measurement; the staleness is the server's call on that measurement.
+
+    They are carried separately so a client can show "last updated 3 hours ago" without
+    having to know — or guess — the threshold that decides when three hours is too long.
+    A client that recomputes staleness from the seconds has forked the threshold, which
+    is the thing carrying it on the wire is meant to prevent.
+    """
+    fresh = _queue_status_task(stage_age_seconds=30, stage_stale=False)
+    stuck = _queue_status_task(stage_age_seconds=30, stage_stale=True)
+    assert fresh.stage_age_seconds == stuck.stage_age_seconds
+    assert fresh.stage_stale != stuck.stage_stale
 
 
 def _history_item(**overrides: Any) -> s.SubmissionHistoryItem:

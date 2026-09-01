@@ -1245,6 +1245,30 @@ class QueueStatusTask(Contract):
     #: same data is called `detail` — one thing with two names is exactly what this file
     #: exists to eliminate, so it is uniformly called `detail`.
     stage: str | None = None
+    #: How long this `stage` has gone without moving, in seconds. **Only present on
+    #: `evaluating` rows**; `null` everywhere else.
+    #:
+    #: 🔴 **A stage does not expire on its own, so a reader cannot tell whether to
+    #: believe it.** On 2026-09-01 a GPU worker died right after reporting
+    #: `benchmark_prechecking` and then restarted every two minutes without ever
+    #: reporting again. The public queue kept showing "prechecking" for hours, for a
+    #: precheck that no longer existed. From outside, "currently prechecking" and "died
+    #: at prechecking" were the same pixels, and two miners who had already burned TAO
+    #: sat there unable to tell the difference.
+    #:
+    #: Note this is **an age, not a verdict**: the backend does not conclude anything
+    #: from it, and a stale stage is not a failed task. Whoever fixes the worker decides
+    #: what the failure is; this only stops the page from asserting a freshness it
+    #: cannot vouch for.
+    stage_age_seconds: int | None = None
+    #: Whether `stage_age_seconds` has passed the backend's threshold.
+    #:
+    #: ⚠️ **The threshold lives on the server, deliberately.** Handing out only the
+    #: seconds and letting each client decide means two clients call the same task stuck
+    #: at two different moments — and the one that has to explain itself to a miner is
+    #: whichever one is on screen. Clients use the boolean to grey the row out and the
+    #: seconds to say "last updated 3 hours ago".
+    stage_stale: bool = False
     detail: dict[str, Any] | None = None
     #: ⚠️ The two below **only appear when `eval_status == "pending"`, and as a "missing
     #: key" rather than as `null`** (measured live; the frontend's `types.ts:146` is
