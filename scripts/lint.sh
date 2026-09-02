@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 #
-# 静态检查门禁。三个工具各管一段，都不能删：
-#   ruff check          lint（含 T201 禁 print —— 这个包不该往 stdout 写东西）
-#   ruff format --check 格式；只查不改，改用 `uv run ruff format .`
-#   mypy --strict       类型正确性
+# The static-check gate. Three tools cover three parts and none may be dropped:
+#   ruff check          lint (including T201, no print — this package must not write
+#                       to stdout)
+#   ruff format --check formatting; checks only, use `uv run ruff format .` to fix
+#   mypy --strict       type correctness
 #
-# 只对 src 跑 mypy：tests/ 里为了构造非法输入会故意传错类型，strict 下必然报错，
-# 而那正是用例要验证的东西。ruff 则查全仓（tests/ 和这个脚本目录也算）。
+# mypy runs on src only: tests/ deliberately passes wrong types to construct illegal
+# inputs, which strict mode necessarily flags — and that is exactly what those cases
+# verify. ruff runs on the whole repo (tests/ and this script directory included).
 #
-# CI 直接调这个脚本（.github/workflows/ci.yml 的 Lint 步骤），所以本地绿 = CI 绿。
-# 分开写两套的下场是：本地过了、CI 红，或者更糟 —— CI 那套悄悄比本地弱。
+# CI calls this script directly (the Lint step of .github/workflows/ci.yml), so green
+# locally means green there. Writing two copies ends in "passes locally, red in CI",
+# or worse, a CI copy that is quietly weaker.
 #
-# 用 `uv run` 前缀，这样不激活 venv 也能跑 —— AGENTS.md §3 承诺的就是
-# 裸 `bash scripts/lint.sh`。
+# The `uv run` prefix means it works without activating the venv — a bare
+# `bash scripts/lint.sh` is what AGENTS.md §3 promises.
 
 set -e
 set -x

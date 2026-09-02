@@ -239,8 +239,9 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.LeaderboardAudit: {"score_json_url", "logs_url", "env_hash"},
     s.LeaderboardRow: {
         "rank",
-        # 🔴 **这一个留着。** 它是 `/api/rank` 的对外字段，08-18 实测 12 个
-        # 不同 IP 在打，身份未核实 —— 和评测方那几个不是一回事。
+        # 🔴 **This one stays.** It is an outward-facing field of `/api/rank`;
+        # measured on 08-18, twelve distinct IPs were pulling it and none of their
+        # owners is identified — not the same thing as the evaluation party's.
         "round_num",
         "submission_id",
         "miner_uid",
@@ -1740,11 +1741,13 @@ def test_envelopes_are_frozen_like_every_other_response() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🔴 后端阶段 1 把哨兵值换成了 null —— 契约必须跟得上
+# 🔴 The backend's phase 1 replaced sentinel values with null; the contract has to
+# keep up
 # ─────────────────────────────────────────────────────────────────────────────
 
-#: 一行真实响应的字段形状，取自 `api-dev.openroboto.ai` 2026-08-21 实测。
-#: hotkey / 仓库名 / task_id 已替换，其余保持原样 —— **尤其是那些 `None`**。
+#: The field shape of one real response, measured against `api-dev.openroboto.ai` on
+#: 2026-08-21. The hotkey, repo name and task_id are substituted; everything else is
+#: verbatim — **the `None`s above all**.
 _REAL_HISTORY_ROW = {
     "id": 1,
     "task_id": "<redacted>",
@@ -1766,7 +1769,8 @@ _REAL_HISTORY_ROW = {
     "eval_status": "pending",
     "env_list": ["libero_spatial"],
     "model_hash": ("02e50f7d7d26d3298a500f2b9ccc3e0c8d1a9e6cceadf9ae545c4fcc1cee466a"),
-    # 🔴 后端真的会发这些 null。此前契约把它们声明成 `str = ""`。
+    # 🔴 The backend really does send these nulls. The contract used to declare them
+    # as `str = ""`.
     "result": None,
     "detail": None,
     "reject_reason": None,
@@ -1777,20 +1781,22 @@ _REAL_HISTORY_ROW = {
 
 
 def test_a_real_response_row_parses() -> None:
-    """🔴 **这条是拿真实响应喂出来的，不是手写的。**
+    """🔴 **This case is fed a real response, not a hand-written one.**
 
-    2026-08-21，CLI 的第一次真实端到端跑在最后一步炸了：
+    On 2026-08-21 the CLI's first real end-to-end run blew up at the last step:
 
         2 validation errors for ListEnvelope[SubmissionHistoryItem]
         data.0.model_hash  Input should be a valid string, input_value=None
         data.0.stage       Input should be a valid string, input_value=None
 
-    那时 burn 已经付过、模型已经传上 HF —— **代价是真金白银的那一步之后才发现
-    契约对不上**。根因是后端阶段 1 把「没有值」的列全部换成了 SQL NULL，
-    而契约这边三个字段还停在 `str = ""`。
+    By then the payment was made and the model was already on HuggingFace — **the
+    contract mismatch surfaced only after the step that costs real money**. The root
+    cause is that the backend's phase 1 turned every "no value" column into SQL NULL
+    while three fields here were still `str = ""`.
 
-    手写的用例挡不住这类：写的人按契约构造输入，于是永远自洽。所以这一行
-    直接取自实测响应，**尤其保留了那些 `None`**。
+    A hand-written case cannot catch this class: whoever writes it constructs the
+    input from the contract, so it is self-consistent forever. This row is taken
+    straight from a measured response, **keeping the `None`s in particular**.
     """
     item = s.SubmissionHistoryItem.model_validate(_REAL_HISTORY_ROW)
 
@@ -1800,16 +1806,17 @@ def test_a_real_response_row_parses() -> None:
 
 
 def test_the_fields_phase_one_made_nullable_are_nullable() -> None:
-    """逐个钉住，别再漏。
+    """Pin them one by one so none is missed again.
 
-    `model_hash` / `stage` / `reject_reason` 三个是同一次改造的产物；
-    漏掉任何一个的表现都一样：矿工烧完钱，最后一步解析失败。
+    `model_hash` / `stage` / `reject_reason` all came out of the same change, and
+    missing any one of them looks the same from outside: the miner pays, and parsing
+    fails at the last step.
     """
     for field in ("model_hash", "stage", "reject_reason"):
         annotation = s.SubmissionHistoryItem.model_fields[field].annotation
         assert "None" in str(annotation), (
-            f"{field} 声明成 {annotation} —— 后端会发 null，"
-            f"而这条路径上矿工已经付过 burn"
+            f"{field} is declared as {annotation} — the backend sends null, and on "
+            f"this path the miner has already paid"
         )
 
 

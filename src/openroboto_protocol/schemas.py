@@ -1923,7 +1923,7 @@ class Competition(Contract):
     track: Track
     #: 1-based, per track.
     seq: int
-    #: For humans (`π0.5`, `xArm 6 第一届`). Never matched on.
+    #: For humans (`π0.5`, `xArm 6 Season 1`). Never matched on.
     label: str
     #: Which evaluation implementation runs this season (`sim_openpi`, `sim_lingbot`,
     #: `real_xarm6`). Left as an open `str`: the vocabulary grows with every new season,

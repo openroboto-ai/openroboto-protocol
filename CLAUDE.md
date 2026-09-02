@@ -1,17 +1,26 @@
 # CLAUDE.md
 
-项目规范的**唯一来源**是 `AGENTS.md`（Claude Code / Codex / Cursor 共用一份，避免两份文档漂移）。
+The **single source** of project conventions is `AGENTS.md` (shared by Claude Code /
+Codex / Cursor, so the two do not drift apart).
 
 @AGENTS.md
 
 ---
 
-## Claude Code 专属
+## Claude Code specifics
 
-- **这是公开仓：注释、docstring、commit message 全部英文**（AGENTS.md §4）。
-  读它的人不在团队里 —— 矿工、评测方、外部验证者、任何 `pip install` 之后点进
-  源码的人。中文注释对他们等于没有注释，而这个包的注释本身就是主要资产。
-  ⚠️ 我默认会跟着仓库里已有的语言走，所以这条要写在这里。
-- 文档与工程规范以 `~/Playground/quantitative-trading-agent-service/CLAUDE.md` 为准，写文档或建目录前先读它，不要凭记忆复述。
-- 这个包的每一行都在钱路径上。动任何已发布函数之前，先说明理由，再动手。
-- 文档说法冲突时的裁决顺序：**生产行为 > 可执行代码 > ADR > 旧计划**。到代码这一层仍含糊 —— 停下来问，不要写一个看起来合理的答案。
+- **Read `../openroboto-backend/DECISIONS.md` first** — Cameron's ruling log, shared
+  by the three repos. It outranks anything in this repo.
+- **This is a public repo: comments, docstrings and commit messages are all in
+  English** (AGENTS.md §4). Its readers are not on the team — miners, the
+  evaluation party, external validators, anyone who clicks into the source after
+  `pip install`. Written here as well because the default is to follow whatever
+  language a repository already uses.
+- Documentation and engineering conventions follow
+  `~/Playground/quantitative-trading-agent-service/CLAUDE.md`. Read it before
+  writing docs or creating directories; do not restate it from memory.
+- Every line in this package is on the money path. State the reason before touching
+  any released function.
+- Order of authority when documents disagree: **production behaviour > executable
+  code > ADR > old plans**. Still ambiguous at the code level — stop and ask, do not
+  write an answer that merely looks reasonable.

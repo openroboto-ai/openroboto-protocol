@@ -106,7 +106,7 @@ def test_version_and_the_compatibility_promise_move_together() -> None:
     major = int(version("openroboto-protocol").split(".")[0])
     warned = "compatibility is not promised" in (root / "README.md").read_text(
         "utf-8"
-    ) and "不承诺兼容" in (root / "AGENTS.md").read_text("utf-8")
+    ) and "compatibility is not promised" in (root / "AGENTS.md").read_text("utf-8")
     assert _promise_mismatch(major, warned) is None, _promise_mismatch(major, warned)
 
 

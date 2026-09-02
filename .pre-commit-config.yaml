@@ -1,25 +1,30 @@
-# 提交前的第一道网，和 openroboto-backend 的同名文件同源（只删掉那边前端和
-# `.trellis/` 相关的部分，本仓没有那些目录，也就不需要 `exclude:`）。
+# The first net before a commit. Same origin as openroboto-backend's file of the
+# same name, minus its frontend and `.trellis/` parts — this repo has neither of
+# those directories, so it needs no `exclude:`.
 #
-# 装一次：`uvx pre-commit install`。不进 dev 依赖组是故意的 —— 这个包的
-# `[dependency-groups] dev` 会跟着 CI 一起装进 runner，而 pre-commit 只在
-# 人的机器上有意义，没必要让每次 `uv sync --locked` 多下一棵依赖树。
+# Install once: `uvx pre-commit install`. Keeping it out of the dev group is
+# deliberate — `[dependency-groups] dev` is installed on every CI runner, while
+# pre-commit only means anything on a human's machine, so there is no reason to make
+# every `uv sync --locked` download another dependency tree.
 #
-# 这里挡不住的东西由 CI 挡（覆盖率 100%、黄金向量、wheel 里有没有 py.typed）。
-# 反过来也一样：本地跳过 hook 不会让坏东西合进 main，只会让你在 CI 上多等 5 分钟。
+# What this cannot catch, CI does (100% coverage, golden vectors, py.typed in the
+# wheel). And the other way round: skipping a hook locally does not let anything bad
+# into main, it only costs you five minutes waiting on CI.
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # v6.0.0
     hooks:
       - id: check-added-large-files
-      # pyproject.toml 语法错 = 包直接构建不出来，这条比任何测试都早发现。
+      # A syntax error in pyproject.toml means the package will not build at all;
+      # this catches it earlier than any test.
       - id: check-toml
       - id: check-yaml
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: check-merge-conflict
-      # 这个包不该有任何密钥，但仓库是 public 的，误 add 一次就是永久泄漏。
+      # This package should hold no secrets at all, but the repository is public and
+      # one accidental `git add` is a permanent leak.
       - id: detect-private-key
 
   - repo: https://github.com/crate-ci/typos
@@ -30,10 +35,11 @@ repos:
 
   - repo: local
     hooks:
-      # language: system + `uv run`：用仓库 venv 里那个版本的 ruff / mypy，
-      # 和 `scripts/lint.sh`、和 CI 是同一个二进制。pre-commit 自带的
-      # `repo: https://github.com/astral-sh/ruff-pre-commit` 会另装一份，
-      # 于是 hook 绿、CI 红，因为两边 ruff 版本不同。
+      # language: system + `uv run`: use the ruff / mypy from the repo venv, the same
+      # binary `scripts/lint.sh` and CI use. pre-commit's own
+      # `repo: https://github.com/astral-sh/ruff-pre-commit` installs a second copy,
+      # and then the hook is green while CI is red because the two ruff versions
+      # differ.
       - id: local-ruff-check
         name: ruff check
         entry: uv run ruff check --force-exclude --fix --exit-non-zero-on-fix
@@ -48,8 +54,8 @@ repos:
         language: system
         types: [python]
 
-      # pass_filenames: false —— mypy strict 必须看整个 src 才能推导，
-      # 只喂改动的那几个文件会漏掉调用方的类型错误。
+      # pass_filenames: false — mypy strict needs the whole of src to infer; feeding
+      # it only the changed files misses type errors at the call sites.
       - id: local-mypy
         name: mypy check
         entry: uv run mypy src
