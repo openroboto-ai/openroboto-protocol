@@ -1627,7 +1627,7 @@ def test_probes_are_never_enveloped() -> None:
     wrapped in an envelope, and the same goes for `/metrics`.
 
     Their consumers are PM2 / the load balancer / Prometheus, and with an
-    envelope they cannot parse it at all — the consequence of an unparseable
+    envelope they cannot parse it at all — the consequence of an unparsable
     health check is **traffic being pulled or the process being restarted over
     and over**, which is even more urgent than a wrong field. `/metrics` has no
     model in the protocol package (it is Prometheus text format as `text/plain`,
