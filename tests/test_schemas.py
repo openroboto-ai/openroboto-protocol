@@ -16,8 +16,8 @@ Three kinds of assertions, matching the three things the task asks for:
    (`ProgressAccepted.status`) is counted too — what the consumer sees is the
    serialized JSON.
 2. **Enum values must come from the vocabulary in `status.py`** — the stage
-   words equal `ALL_STAGES`; the leaderboard-position words / round words have
-   zero overlap with the lifecycle words ("one response, one vocabulary").
+   words equal `ALL_STAGES`; the leaderboard-position words have zero overlap
+   with the lifecycle words ("one response, one vocabulary").
 3. **Behaviour that has bitten someone** — the docstring of each test spells out
    which incident it guards against.
 """
@@ -207,7 +207,7 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
     s.SubmissionArtifacts: {"score_json_url", "logs_url"},
     s.SubmissionDetail: {
         "submission_id",
-        "round_id",
+        "competition_id",
         "miner",
         "model",
         "eval_status",
@@ -234,15 +234,15 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "reason",
     },
     s.ScanRejectionsResponse: {"rejections", "total", "limit", "offset", "success"},
-    # —— leaderboard and rounds ——
+    # —— leaderboard ——
     s.TasksPassed: {"passed", "total"},
     s.LeaderboardAudit: {"score_json_url", "logs_url", "env_hash"},
     s.LeaderboardRow: {
         "rank",
-        # 🔴 **This one stays.** It is an outward-facing field of `/api/rank`;
-        # measured on 08-18, twelve distinct IPs were pulling it and none of their
-        # owners is identified — not the same thing as the evaluation party's.
-        "round_num",
+        # Display only, and it cannot locate a season on its own — `(sim, 1)` and
+        # `(real, 1)` share it. `/api/rank` and `/api/v1/leaderboard` both send it
+        # under this name.
+        "seq",
         "submission_id",
         "miner_uid",
         "miner",
@@ -256,31 +256,13 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "scored_at",
     },
     s.Baseline: {"model_name", "hf_repo", "score", "revision"},
-    s.LeaderboardResponse: {"round_id", "generated_at", "baseline", "total", "rows"},
-    s.Champion: {
-        "miner_hotkey",
-        "miner_name",
-        "model_name",
-        "score",
-        "delta_vs_prev_champion",
-        "settled_at",
-        "held",
+    s.LeaderboardResponse: {
+        "competition",
+        "generated_at",
+        "baseline",
+        "total",
+        "rows",
     },
-    s.RoundSummaryEntry: {"id", "label", "status", "champion"},
-    s.RoundDetail: {
-        "id",
-        "label",
-        "status",
-        "network",
-        "base_model",
-        "submission_count",
-        "started_at",
-        "ends_at",
-        "champion",
-    },
-    s.CurrentRoundResponse: {"round"},
-    s.RoundsSummary: {"rounds_settled", "cumulative_improvement"},
-    s.RoundHistoryResponse: {"summary", "rounds", "total"},
     # —— one season and the spec frozen for it (ADR 03) ——
     s.Competition: {
         "id",
@@ -315,7 +297,7 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "log_ref",
     },
     # —— operational probes ——
-    s.LivenessResponse: {"round", "netuid", "status"},
+    s.LivenessResponse: {"competition", "netuid", "status"},
     s.ReadinessCheck: {"ok", "detail"},
     s.ReadinessResponse: {"ready", "database", "migration", "alembic_version"},
 }
@@ -412,8 +394,8 @@ def test_stage_vocabulary_is_status_py() -> None:
 
 
 def test_display_vocabularies_never_overlap_lifecycle_words() -> None:
-    """The leaderboard-position words / round words have **zero overlap** with
-    the lifecycle words — "one response, one vocabulary".
+    """The leaderboard-position words have **zero overlap** with the lifecycle
+    words — "one response, one vocabulary".
 
     Production `/api/v1/leaderboard` emits both `champion` (a
     leaderboard-position word) and `scored` (a lifecycle word) in the same
@@ -421,14 +403,11 @@ def test_display_vocabularies_never_overlap_lifecycle_words() -> None:
     over the same data give different words.
     """
     assert s.LEADERBOARD_STATUSES & ALL_STATUSES == frozenset()
-    assert s.ROUND_STATUSES & ALL_STATUSES == frozenset()
-    assert s.LEADERBOARD_STATUSES & s.ROUND_STATUSES == frozenset()
-    # A season's lifecycle is a fourth vocabulary, on a different object. It has to
-    # stay disjoint from the other three for the same reason: one `status` key whose
+    # A season's lifecycle is a third vocabulary, on a different object. It has to
+    # stay disjoint from the other two for the same reason: one `status` key whose
     # word set depends on which endpoint answered is unreadable at the consumer.
     assert s.COMPETITION_STATUSES & ALL_STATUSES == frozenset()
     assert s.COMPETITION_STATUSES & s.LEADERBOARD_STATUSES == frozenset()
-    assert s.COMPETITION_STATUSES & s.ROUND_STATUSES == frozenset()
 
 
 def test_leaderboard_status_rejects_lifecycle_words() -> None:
@@ -444,18 +423,11 @@ def test_leaderboard_status_rejects_lifecycle_words() -> None:
         _leaderboard_row(status="eliminated")
 
 
-def test_round_status_rejects_undecided_scoring_word() -> None:
-    """The third state `scoring` has no defensible definition (spec 04 §9 Q2), so
-    it does not enter the vocabulary until that is settled."""
-    with pytest.raises(ValidationError):
-        s.RoundSummaryEntry(id=1, label="Round 01", status="scoring")  # type: ignore[arg-type]
-
-
 def test_queue_summary_buckets_are_real_status_words() -> None:
     """Every bucket in the summary must be a status word that really exists,
     except `unknown` / `total`.
 
-    Check it the other way round as well: the words in `ALL_STATUSES` that have
+    Check it in the other direction too: the words in `ALL_STATUSES` that have
     no bucket (`received` / `burn_checking` / `burn_passed` / `seed_failed`) fall
     into `unknown` — **falling in there must raise an alert, they must not be
     dropped silently**; that is the lesson of ZCY-130 undercounting by 45 rows.
@@ -529,7 +501,7 @@ def _full_env_scores() -> list[dict[str, Any]]:
 def _leaderboard_row(**overrides: Any) -> s.LeaderboardRow:
     payload: dict[str, Any] = {
         "rank": 1,
-        "round_num": 1,
+        "seq": 1,
         "submission_id": "task_abc_r1_v1",
         "miner_uid": 218,
         "miner": {"hotkey": "5FQxZBhriyAv6K", "display_name": "5FQxZBhriyAv"},
@@ -581,7 +553,6 @@ def _queue_task(**overrides: Any) -> s.QueueTask:
         "miner_hotkey": "5FQxZ",
         "hf_repo_id": "x/y",
         "hf_commit": "a" * 40,
-        "round_num": 1,
         "seed": 42,
         "block_hash": "0x" + "b" * 64,
         "drand_random": "c" * 64,
@@ -1027,67 +998,21 @@ def _submission_record(**overrides: Any) -> s.SubmissionRecord:
         "miner_hotkey": "5FQxZ",
         "hf_repo_id": "x/y",
         "hf_commit": "a" * 40,
-        "round_num": 1,
     }
     payload.update(overrides)
     return s.SubmissionRecord.model_validate(payload)
 
 
-# --- leaderboard / rounds ---
+# --- leaderboard ---
 
 
-def test_leaderboard_row_carries_round_num() -> None:
-    """`round_num` is the key production has and the new skeleton dropped —
-    delete it and whoever reads it gets undefined."""
-    assert _leaderboard_row().round_num == 1
-
-
-def test_champion_score_shape_matches_leaderboard_rank1() -> None:
-    """`champion.score` is a bare float and must be able to equal the
-    `score.mean` of rank 1 on the leaderboard.
-
-    Cross-endpoint consistency assertion 2 (spec 04 §5). Only the type shape is
-    pinned down here — equality of the values has to be asserted in the backend's
-    integration tests.
-    """
-    row = _leaderboard_row()
-    champion = s.Champion(
-        miner_hotkey=row.miner.hotkey,
-        miner_name=row.miner.display_name,
-        model_name=row.model.name,
-        score=row.score.mean,
-    )
-    assert champion.score == row.score.mean
-    assert champion.held is True
-    assert champion.delta_vs_prev_champion is None
-
-
-def test_round_detail_start_and_end_stay_null() -> None:
-    """There is no rounds table, so `started_at` / `ends_at` cannot be made up →
-    always `null`.
-
-    **Do not fake them with local time.**
-    """
-    detail = s.RoundDetail(
-        id=1,
-        label="Round 01",
-        status="live",
-        network="finney",
-        base_model=s.ModelRef(name="pi0.5", hf_repo="x/y"),
-        submission_count=117,
-    )
-    assert detail.started_at is None and detail.ends_at is None
-    assert detail.champion is None
-
-
-def test_empty_database_returns_round_null_not_an_error_object() -> None:
-    """An empty database is `{"round": null}` plus 200.
-
-    **Not** `{"error": "no rounds found"}` plus 200 (expressing failure with a
-    200 has already forced the frontend to normalize at the boundary), **and not**
-    a 404 either.
-    """
-    assert s.CurrentRoundResponse().model_dump() == {"round": None}
+def test_leaderboard_row_carries_seq() -> None:
+    """`seq` is display only. It is here because both `/api/rank` and
+    `/api/v1/leaderboard` send it, and deleting it makes whoever reads it get
+    undefined — but nothing may branch on it: `(sim, 1)` and `(real, 1)` share
+    the value, so it locates nothing. `LeaderboardResponse.competition` is what
+    says which season was computed."""
+    assert _leaderboard_row().seq == 1
 
 
 def test_score_std_is_none_not_zero_for_single_trial() -> None:
@@ -1117,7 +1042,6 @@ def _queue_status_task(**overrides: Any) -> s.QueueStatusTask:
         "burn_block": 1230,
         "hf_repo_id": "x/y",
         "hf_commit": "a" * 40,
-        "round_num": 1,
     }
     payload.update(overrides)
     return s.QueueStatusTask.model_validate(payload)
@@ -1156,7 +1080,6 @@ def _history_item(**overrides: Any) -> s.SubmissionHistoryItem:
         "task_id": "task_abc_r1_v1",
         "uid": 7,
         "hotkey": "5FQxZ",
-        "round_num": 1,
         "hf_repo_id": "x/y",
         "hf_commit": "a" * 40,
         "commit_block": 1234,
@@ -1176,7 +1099,7 @@ def test_seed_triple_is_null_when_no_seed_was_ever_assigned() -> None:
     **all three `null` together**.
 
     `drand_round=0` is the sharpest of them: the official drand API returns
-    **200** for `/public/0`, with the content of the latest round of the day (an
+    **200** for `/public/0`, with that day's latest drand_round as content (an
     alias of `latest`, measured 2026-08-19). An auditor querying it does not get
     a 404, they get today's beacon, and then `verify_seed()` is necessarily False
     — and they have no way to tell whether we cheated or the data is missing.
@@ -1212,13 +1135,14 @@ def test_seed_alone_is_rejected_because_zero_cannot_be_told_apart() -> None:
     `drand_round` can carry `gt=0` and `drand_random` can carry `min_length=1`,
     while `seed` can carry neither (0 is a legal output of `derive_seed()`). So
     what it relies on is **consistency**: the inputs of `derive_seed` are
-    block_hash + round + drand_random, so the time a seed really was dispatched
+    block_hash + competition_id + drand_random, so the time a seed really was
+    dispatched
     all three fields necessarily have values at once.
 
     What this stops is exactly the shape of those 20 rows in production:
     `{seed: 0, drand_random: null, drand_round: null}`. Without this check they
     would serialize out quietly, and an auditor querying drand with
-    `drand_round: 0` would get the latest round of the day (`/public/0` is an
+    `drand_round: 0` would get that day's latest drand_round (`/public/0` is an
     alias of `latest`).
     """
     for kwargs in (
@@ -1271,7 +1195,7 @@ def test_competition_instants_default_to_unbounded_not_to_a_faked_date() -> None
     means **this boundary is not checked** — not "unknown".
 
     A consumer that reads `None` as missing data and fills in a plausible date
-    (now, the round's start, `datetime.max`) invents a submission window nobody
+    (now, the season's start, `datetime.max`) invents a submission window nobody
     configured: too early closes submissions on miners who paid, too late accepts
     entries into a season that is already being evaluated.
     """
@@ -1376,9 +1300,9 @@ def test_competition_track_is_the_commitment_vocabulary() -> None:
 def test_liveness_status_is_a_constant() -> None:
     """The `status` of `/healthz` is always `"ok"`; any other value is
     unrepresentable."""
-    assert s.LivenessResponse(round=1, netuid=80).status == "ok"
+    assert s.LivenessResponse(competition=1, netuid=80).status == "ok"
     with pytest.raises(ValidationError):
-        s.LivenessResponse(round=1, netuid=80, status="degraded")  # type: ignore[arg-type]
+        s.LivenessResponse(competition=1, netuid=80, status="degraded")  # type: ignore[arg-type]
 
 
 def test_readiness_body_shape_is_identical_for_200_and_503() -> None:
@@ -1437,7 +1361,7 @@ def test_leaderboard_generated_at_is_the_only_moving_field() -> None:
     keys = _RESPONSE_KEYS[s.LeaderboardResponse]
     assert "generated_at" in keys
     response = s.LeaderboardResponse(
-        round_id=1,
+        competition=1,
         generated_at=datetime.now(UTC),
         baseline=s.Baseline(
             model_name="pi0.5", hf_repo="x/y", score=s.ScoreStat(mean=0.502917)
@@ -1520,7 +1444,7 @@ def test_success_response_always_has_data_and_never_error() -> None:
 
 
 def test_error_response_always_has_error_and_never_data() -> None:
-    """An error response is the other way round. `retryable` has **no default**;
+    """An error response is the mirror image. `retryable` has **no default**;
     it has to be thought about explicitly, once.
 
     Defaulting to `False` means choosing the "not retryable" side on behalf of
@@ -1711,7 +1635,11 @@ def test_probes_are_never_enveloped() -> None:
     """
     for probe in (s.LivenessResponse, s.ReadinessResponse):
         assert _serialized_keys(probe) & {"data", "meta", "error"} == set()
-    assert _serialized_keys(s.LivenessResponse) == {"round", "netuid", "status"}
+    assert _serialized_keys(s.LivenessResponse) == {
+        "competition",
+        "netuid",
+        "status",
+    }
 
 
 def test_envelope_generics_survive_into_openapi() -> None:
@@ -1753,7 +1681,6 @@ _REAL_HISTORY_ROW = {
     "task_id": "<redacted>",
     "uid": 23,
     "hotkey": "<redacted>",
-    "round_num": 1,
     "hf_repo_id": "<redacted>",
     "hf_commit": "ba782170658f3ea41d1950af49aa200877ec630f",
     "commit_block": 7830000,
@@ -1958,7 +1885,7 @@ def test_media_ref_rejects_a_non_positive_size(bad: int) -> None:
     """`None` = the uploader does not know; 0 = an empty object, which is not
     evidence. The backend's presign request declares the same value as
     `Field(gt=0, le=MAX_EVIDENCE_BYTES)`, so without this bound the mismatch is
-    found one round-trip later — after the upload."""
+    found one request later — after the upload."""
     with pytest.raises(ValidationError):
         s.MediaRef(uri="s3://x", sha256="a" * 64, bytes_len=bad)
 

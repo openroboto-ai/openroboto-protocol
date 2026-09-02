@@ -17,11 +17,11 @@ pip install "openroboto-protocol==0.10.0"
 ```python
 from openroboto_protocol.seed import derive_seed, verify_seed
 
-seed = derive_seed(block_hash, round_num, drand_random)
+seed = derive_seed(block_hash, competition_id, drand_random)
 ```
 
-Since 0.9.0 the second argument is the competition id (`competitions.id`), not a
-round number; the parameter name is kept for compatibility.
+The second argument is `competitions.id`. 0.11.0 renamed that parameter without
+moving a byte — see the CHANGELOG — so every historical seed still reproduces.
 
 Python **3.11+** (miners and the evaluator run 3.11, the backend runs 3.12; CI
 tests both). Ships `py.typed`, so your `mypy` sees the real types.
@@ -50,7 +50,7 @@ copy-paste away from happening.
 
 | Module | Contract | Who needs both sides to agree |
 | --- | --- | --- |
-| `seed.py` | Seed derivation — block hash + round + drand randomness → uint32 | Backend derives it, miners verify it |
+| `seed.py` | Seed derivation — block hash + competition id + drand randomness → uint32 | Backend derives it, miners verify it |
 | `commitment.py` | Commitment payload encode / decode | Miners write it on chain, backend reads it |
 | `model_hash.py` | Model fingerprinting | Both compute it; a mismatch rejects a submission |
 | `model_format.py` | What a submittable checkpoint must contain | Miners export to it, the evaluator rejects against it |

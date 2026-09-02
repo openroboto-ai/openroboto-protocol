@@ -4,7 +4,7 @@
 Contract meaning
 ----------------
 Two submissions with the same fingerprint = the same weights. The backend uses
-this to judge plagiarism: when two fingerprints collide within one round, the
+this to judge plagiarism: when two fingerprints collide within one season, the
 one with the earlier on-chain ``commit_block`` is the original and the later one
 is marked ``rejected``. So this algorithm must be independently recomputable by
 miners — if what they compute disagrees with the backend, it is the miner's
@@ -68,7 +68,7 @@ def extract_lfs_sha256(lfs_field: object) -> str:
     huggingface_hub maps it the same way itself
     (``BlobLfsInfo(sha256=lfs["oid"])``). Both keys are accepted, ``sha256``
     taking precedence.
-    Evidence from real data: the tree response of the round 1 champion's repo
+    Evidence from real data: the tree response of the `(sim, 1)` champion's repo
     contains only ``oid``, so the ``or oid`` fallback is the **main path**, not
     defensive code.
 

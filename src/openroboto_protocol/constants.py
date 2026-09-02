@@ -206,18 +206,19 @@ class DrandBeacon:
     """The three parameters of a drand chain, bound into one record — they can
     only ever be changed together.
 
-    `genesis_time` and `period_seconds` decide "which round a given point in
-    time corresponds to", and `chain_hash` decides "which chain that round is
-    fetched from". Cross any one of them and the round you compute points at a
-    random number on a different chain, the seed changes with it, and **once the
-    seed changes, historical evaluations are no longer reproducible** (spec §5).
+    `genesis_time` and `period_seconds` decide "which drand_round a given point
+    in time corresponds to", and `chain_hash` decides "which chain that
+    drand_round is fetched from". Cross any one of them and the drand_round
+    you compute points at a random number on a different chain, the seed changes
+    with it, and **once the seed changes, historical evaluations are no longer
+    reproducible** (spec §5).
     Writing the three as separate module constants is what gives you the chance
     to cross them.
     """
 
     #: drand chain identifier (also a segment of the API path).
     chain_hash: str
-    #: Unix timestamp (seconds) of round 1 of that chain.
+    #: Unix timestamp (seconds) of drand_round 1 of that chain.
     genesis_time: int
     #: Beacon period (seconds).
     period_seconds: int
@@ -229,7 +230,7 @@ class DrandBeacon:
 #: Checked against `https://api.drand.sh/<chain_hash>/info` on 2026-08-17:
 #: period=30, genesis_time=1595431050, and the hash matches.
 #:
-#: The round conversion formula (`max(1, (ts - genesis) // period + 1)`) and the
+#: The drand_round conversion formula (`max(1, (ts - genesis) // period + 1)`) and the
 #: network request that fetches the random number are both **not in this
 #: module** — the former belongs to `seed.py`, the latter is I/O and belongs to
 #: the backend.

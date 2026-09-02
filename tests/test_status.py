@@ -154,7 +154,7 @@ def test_non_terminal_states(st: str) -> None:
 
 def test_seed_failed_is_retryable_not_terminal() -> None:
     """The seed_failed produced when drand cannot be fetched is retried back to
-    pending by the next chain-scanning round."""
+    pending by the next chain-scanning pass."""
     assert not S.is_terminal(S.STATUS_SEED_FAILED)
     assert S.can_transition(S.STATUS_SEED_FAILED, S.STATUS_PENDING)
 
@@ -216,7 +216,7 @@ def test_supersede_only_from_pending() -> None:
 
 def test_reject_is_reachable_from_every_non_terminal_state() -> None:
     """Any step on the chain-scanning side may end in rejection (burn not valid /
-    HF structure / duplicate / round mismatch)."""
+    HF structure / duplicate / wrong season)."""
     for src in S.ALL_STATUSES - S.TERMINAL_STATUSES:
         assert S.can_transition(src, S.STATUS_REJECTED), src
 

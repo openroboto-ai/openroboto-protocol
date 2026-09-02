@@ -1,17 +1,17 @@
 """Evaluation seed derivation — the reddest red line in the subnet.
 
 **What it promises**: given three public inputs (the hash of the block that
-contains the commitment, the subnet round, and the randomness of the drand
+contains the commitment, the competition id, and the randomness of the drand
 quicknet beacon), anyone can compute exactly the same uint32 seed as the
 backend. The formula is public, and publishing it gives nothing away: at the
 moment a miner submits a commitment, the hash of the block that will contain it
-is not yet decided, and the drand randomness of the round that follows does not
-exist yet either — nobody can compute their own seed in advance.
+is not yet decided, and the drand randomness of the drand_round that follows
+does not exist yet either — nobody can compute their own seed in advance.
 
 **What it is not responsible for**:
 - It does not fetch drand (``fetch_drand`` lives in the backend, it has to make
   a network request).
-- It does not work out which drand round to use from the block timestamp (also
+- It does not work out which drand_round to use from the block timestamp (also
   left in the backend's I/O half).
 - It does not do the secondary derivation from base seed to a per-LIBERO-task
   seed (that lives in the public evaluation toolchain).
@@ -39,6 +39,19 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+#: The public surface of this module. What is not listed here is an
+#: implementation detail and may change in a patch release — without it there is
+#: no line between `patch` and `major` (AGENTS.md §1②).
+__all__ = [
+    "DRAND_API",
+    "DRAND_CHAIN_HASH",
+    "SEED_MAX",
+    "SeedInputs",
+    "derive_seed",
+    "drand_round_url",
+    "verify_seed",
+]
+
 # Public identifier of the drand quicknet chain. Changing the chain = changing
 # the entropy source = nothing in the history is reproducible any more, which
 # makes it a major change.
@@ -58,13 +71,13 @@ DRAND_API = "https://api.drand.sh"
 SEED_MAX = 0xFFFFFFFF
 
 
-def derive_seed(block_hash: str, round_num: int, drand_random: str) -> int:
-    """Derive this round's evaluation uint32 seed from three public inputs.
+def derive_seed(block_hash: str, competition_id: int, drand_random: str) -> int:
+    """Derive one competition's evaluation uint32 seed from three public inputs.
 
     The formula (already published externally; changing one character is
     changing history)::
 
-        message = UTF8("{block_hash}:{round_num}:{drand_random}")
+        message = UTF8("{block_hash}:{competition_id}:{drand_random}")
         seed    = big_endian_uint32(SHA256(message)[-4:])
 
     All three arguments take part in the concatenation **exactly as given**,
@@ -73,8 +86,9 @@ def derive_seed(block_hash: str, round_num: int, drand_random: str) -> int:
     production database is lowercase hex with the ``0x``; the drand randomness
     is lowercase hex without a prefix; a different spelling is a different seed.
 
-    Since 0.9.0 the second argument is the competition id (``competitions.id``),
-    not a round number; the parameter name is kept for compatibility.
+    The second argument is ``competitions.id``. Nothing about the bytes moved
+    when it was renamed in 0.11.0: for every submission made so far it holds the
+    same value it always did, so every historical seed still reproduces.
     """
     # The three lines below are word-for-word identical to
     # prototype/backend/seed.py:26.
@@ -82,7 +96,7 @@ def derive_seed(block_hash: str, round_num: int, drand_random: str) -> int:
     # us to drop the argument — but keeping it word for word is what makes it
     # obvious at a glance that extracting this package "only moved things, it
     # did not change them". So the rule stays silenced.
-    seed_input = f"{block_hash}:{round_num}:{drand_random}".encode("utf-8")  # noqa: UP012
+    seed_input = f"{block_hash}:{competition_id}:{drand_random}".encode("utf-8")  # noqa: UP012
     digest = hashlib.sha256(seed_input).digest()
     return int.from_bytes(digest[-4:], byteorder="big")
 
@@ -90,7 +104,7 @@ def derive_seed(block_hash: str, round_num: int, drand_random: str) -> int:
 def verify_seed(
     expected_seed: int,
     block_hash: str,
-    round_num: int,
+    competition_id: int,
     drand_random: str,
 ) -> bool:
     """The auditor's direction: was a published seed really computed from these
@@ -101,17 +115,17 @@ def verify_seed(
     computing it wrong, the inputs being overwritten after the fact, and legacy
     data — deciding the cause is left to the caller.
     """
-    return expected_seed == derive_seed(block_hash, round_num, drand_random)
+    return expected_seed == derive_seed(block_hash, competition_id, drand_random)
 
 
 def drand_round_url(drand_round: int | str = "latest") -> str:
-    """Assemble the public query URL for one round of drand randomness (it only
+    """Assemble the public query URL for one drand_round of randomness (it only
     builds a string, it sends no request).
 
-    ``"latest"`` means the most recent round. The round must be a positive
-    integer: drand rounds start at 1, and in the backend 0 is the sentinel value
-    meaning "which round to use has not been worked out yet", not a round that
-    can be queried.
+    ``"latest"`` means the most recent drand_round. It must otherwise be a
+    positive integer: drand numbering starts at 1, and in the backend 0 is the
+    sentinel meaning "which drand_round to use has not been worked out yet", not
+    something that can be queried.
     """
     if drand_round != "latest" and (
         not isinstance(drand_round, int) or drand_round <= 0
@@ -138,15 +152,15 @@ class SeedInputs:
     #: hash of the block containing the commitment; the production format is
     #: lowercase hex with the ``0x`` prefix
     block_hash: str
-    #: subnet round (not the drand round — do not mix the two up)
-    round_num: int
-    #: the drand quicknet randomness of that round, lowercase hex without the
-    #: ``0x`` prefix
+    #: ``competitions.id`` (not a drand_round — do not mix the two up)
+    competition_id: int
+    #: the drand quicknet randomness of that drand_round, lowercase hex without
+    #: the ``0x`` prefix
     drand_random: str
 
     def derive(self) -> int:
         """Derive the uint32 seed that corresponds to this set of inputs."""
-        return derive_seed(self.block_hash, self.round_num, self.drand_random)
+        return derive_seed(self.block_hash, self.competition_id, self.drand_random)
 
     def verify(self, expected_seed: int) -> bool:
         """Check whether a published seed really came out of this set of inputs."""

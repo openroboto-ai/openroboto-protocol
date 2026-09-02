@@ -102,7 +102,7 @@ Before adding a dependency, ask whether a miner's environment should pay for it.
 >   were separate; only the backend logged a WARNING when a hotkey present in the
 >   snapshot was missing from the metagraph.
 >   Three counter-intuitive details (`w > 0` strictly greater · divide before
->   multiply · `int()` truncates, it does not round to nearest) — "fix" any one of
+>   multiply · `int()` truncates rather than rounding to nearest) — "fix" any one of
 >   them on one side and the two sides compute different u16 values, so the on-chain
 >   consensus averages them away. **No error, no alert, no way to trace it.**
 >   ⚠️ When moving code, **do not** bring `chain_writer.py`'s truncation example

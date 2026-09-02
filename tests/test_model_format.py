@@ -241,7 +241,7 @@ def test_bare_norm_stats_at_the_root_also_passes_with_a_warning() -> None:
 # ── LingBot-VLA 2.0: a second rule set, added in 0.7.0 ────────────────────
 #
 # The openpi cases above are the contract miners have been submitting against
-# since round 1. Everything below is additive; nothing above changed.
+# since `(sim, 1)`. Everything below is additive; nothing above changed.
 
 LINGBOT_LAYOUT = LingbotLayout(
     model_config_file=LINGBOT_MODEL_CONFIG_FILE,
@@ -467,7 +467,7 @@ def test_both_checkers_scan_shared_rules_alike() -> None:
     """``check_lingbot_layout`` re-implements the per-file scan instead of
     refactoring ``check_checkpoint_layout`` into a shared helper: that function
     decides whether TAO a miner already burned counts, it has been published
-    since 0.6.0, and an empty diff is the cheapest proof it still judges round 1
+    since 0.6.0, and an empty diff is the cheapest proof it still judges `(sim, 1)`
     the way it did.
 
     This test is what buys that duplication back. If the two copies ever drift on

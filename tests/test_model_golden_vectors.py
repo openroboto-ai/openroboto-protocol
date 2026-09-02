@@ -23,7 +23,7 @@ Where the expected fingerprints come from
 -----------------------------------------
 Every ``*_MODEL_HASH`` is the value stored in ``submissions.model_hash`` in the
 **production PostgreSQL dump**
-(``openroboto-backend/tests/fixtures/prod-data.sql``, round 1); it is not
+(``openroboto-backend/tests/fixtures/prod-data.sql``, `(sim, 1)`); it is not
 something we computed just now.
 
 While extracting this module, all 37 submissions in the dump whose "hf_commit is
@@ -41,7 +41,7 @@ would reject real miners, and must not ship.
 The last two trees are of a different kind
 ------------------------------------------
 ``LINGBOT_REFERENCE_TREE`` and ``LINGBOT_POST_TRAINED_TREE`` are **not**
-production submissions — no LingBot-VLA round has run yet, and by the time one
+production submissions — no LingBot-VLA season has run yet, and by the time one
 has, the rules that would have to be right on day one are already shipped. They
 are the vendor's two published checkpoints, the only real LingBot trees that
 exist today: the base model, and the RoboTwin post-trained artifact miners are
@@ -658,7 +658,7 @@ def test_lingbot_tree_is_not_an_openpi_checkpoint() -> None:
 
 
 def test_openpi_trees_are_not_lingbot_checkpoints() -> None:
-    """And the other way round. ``config.json`` happens to exist in uid 221's
+    """And the reverse. ``config.json`` happens to exist in uid 221's
     repo, so what separates them is the weights layout, not one file name."""
     for tree in (UID221_PYTORCH_TREE, UID181_JAX_TREE, UID130_NESTED_JAX_TREE):
         assert FormatIssueCode.MISSING_WEIGHTS in _lingbot(tree), tree[0]["path"]
@@ -666,7 +666,7 @@ def test_openpi_trees_are_not_lingbot_checkpoints() -> None:
 
 def test_openpi_trees_still_accepted_after_the_base_model_change() -> None:
     """The most expensive assertion in this file: the three repos that really
-    passed admission in round 1 still pass, byte counts included. Red here means
+    passed admission in `(sim, 1)` still pass, byte counts included. Red here means
     every existing miner is rejected on release day."""
     for tree, kind, counted in (
         (UID221_PYTORCH_TREE, CheckpointKind.PYTORCH, 1943 + 149 + 7233650272 + 119),

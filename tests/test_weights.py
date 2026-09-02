@@ -110,7 +110,7 @@ def test_no_positive_weights_yields_empty_lists() -> None:
     """Nothing to send.
 
     🔴 The caller must **not** send an extrinsic here, and must not treat it as
-    routine: it means no miner is paid this round. Production once hit exactly
+    routine: it means no miner is paid at all. Production once hit exactly
     this -- the response shape changed, every lookup missed, `positive` came out
     empty, and `set_weights` was never called. No exception, no non-2xx, just a
     line saying "No positive weights" and network emissions at zero.

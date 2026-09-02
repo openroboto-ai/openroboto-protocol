@@ -4,7 +4,7 @@ the backend reads it, and the two sides must agree byte for byte.
 A miner stuffs the metadata JSON of one submission into Bittensor's
 `Commitments.set_commitment` (`Data::BigRaw`), and the backend scans the chain
 and reads it back. **This one JSON is the submission itself** — it decides
-which HF repo gets evaluated, which round it counts for, and which burn
+which HF repo gets evaluated, which competition it counts for, and which burn
 transaction is used to check it. If the encoding side and the decoding side
 disagree, the miner burned TAO and nobody saw it.
 
@@ -19,7 +19,7 @@ already eat half of it. Changing a key name = major.
 | `s` | `hotkey_ss58` | miner hotkey, full SS58 string |
 | `h` | `block_hash` | submission block hash, **self-reported**, untrusted, see below |
 | `c` | `hf_commit` | HuggingFace commit SHA, 40 hex characters |
-| `r` | `round_num` | round number |
+| `r` | `claimed_competition_seq` | season ordinal the miner claims, within `sim` |
 | `i` | `hf_repo_id` | HuggingFace repo id, e.g. `kyleab/pi05-scmGbsBoEmiQ` |
 | `b` | `burn_tx_hash` | **payment credential: which transaction**, no `0x` |
 | `bb` | `burn_block` | **payment credential: which block**; `null` when it is 0 |
@@ -28,7 +28,7 @@ already eat half of it. Changing a key name = major.
 
 Three key sets exist on chain, and all three have to decode:
 
-    old miner   s h c r i b bb           no `cid`  → the caller reads it as (sim, r)
+    old miner   s h c r i b bb           no `cid`  → the caller reads it as (sim, seq=r)
     simulation  s h c r i b bb cid
     real robot  s h c r i b bb cid m
 
@@ -42,9 +42,9 @@ Three key sets exist on chain, and all three have to decode:
   payment was a burn (simulation: `add_stake_burn`) or a plain transfer to the
   season's coldkey (real track) is decided by the season `cid` points at, so a
   second pair of keys would only be a second way to say the same thing.
-* **`r` is not removed.** Until the six tenant keys are re-keyed onto
-  `competition_id` it is the safety net, and for a payload without `cid` it is
-  the *only* thing that locates the season: `(sim, seq=r)`.
+* **`r` is not removed.** For a payload without `cid` it is the *only* thing
+  that locates the season: `(sim, seq=r)`. The key name is a byte stream that is
+  already on chain, so it stays `r` however it is spelled in Python.
 
 ### The byte budget, measured
 
@@ -112,7 +112,7 @@ it), not the variant name.
 ## What it is not responsible for
 
 It does not touch the chain, does not look up netuid, does not verify the burn,
-does not overwrite `h`, and does not decide whether a round is the current one
+does not overwrite `h`, and does not decide whether a season is the current one
 — all of those need I/O or backend configuration and stay in the caller.
 
 ## Who consumes it
@@ -304,9 +304,15 @@ class CommitmentPayload:
     commit URL); this module does not block it, the backend's HF check
     rejects it."""
 
-    round_num: int
-    """Round number, on chain `r`. When missing it is treated as 0 — 0 is never
-    equal to the current round, so it gets rejected by the backend."""
+    claimed_competition_seq: int
+    """The season ordinal the miner claims, on chain `r`. Self-reported, and
+    **not** an id: it is `competitions.seq` **within the simulation track**, so
+    the caller resolves it as `(sim, seq=…)`. `competition_id` (`cid`) is the
+    authoritative locator and this is the fallback for payloads written before
+    0.7.0.
+
+    Missing → 0, which no season ordinal can be, so the lookup fails and the
+    backend rejects the submission."""
 
     hf_repo_id: str
     """HuggingFace repo id, on chain `i`, e.g. `kyleab/pi05-scmGbsBoEmiQ`."""
@@ -323,7 +329,7 @@ class CommitmentPayload:
 
     What is stored on chain does **not** have the `0x`; `decode()` adds `0x`
     when it decodes and `encode()` strips it when it writes back. The
-    deduplication key (hotkey + round + burn_tx_hash) depends on this
+    deduplication key (hotkey + season + burn_tx_hash) depends on this
     normalized form."""
 
     burn_block: int
@@ -335,8 +341,9 @@ class CommitmentPayload:
     the backend's `competitions` row, so it is an integer, not a string.
 
     `None` = **the key was absent**, which is every commitment written before
-    0.7.0. The caller then reads the submission as `(sim, seq=round_num)`; that
-    fallback is the reason `r` may not be removed. When it is present the caller
+    0.7.0. The caller then reads the submission as
+    `(sim, seq=claimed_competition_seq)`; that fallback is the reason `r` may not
+    be removed. When it is present the caller
     uses it as-is — track, base model, fee and format rules are all read off
     that row, and a `cid` that resolves to nothing must fail loudly rather than
     fall back to simulation.
@@ -409,7 +416,7 @@ def encode(payload: CommitmentPayload) -> bytes:
         "s": payload.hotkey_ss58,
         "h": _strip_0x(payload.block_hash),
         "c": payload.hf_commit,
-        "r": payload.round_num,
+        "r": payload.claimed_competition_seq,
         "i": payload.hf_repo_id,
         "b": _strip_0x(payload.burn_tx_hash),
         # Writing 0 as null is the historical shape, not a typo.
@@ -510,7 +517,7 @@ def check_payload(payload: CommitmentPayload, track: Track) -> None:
         raise CommitmentFieldError(
             "cid",
             "a real-track submission must name its season; without it the "
-            "submission is read as (sim, seq=round_num)",
+            "submission is read as (sim, seq=claimed_competition_seq)",
             None,
         )
     if payload.model_hash is None:
@@ -656,7 +663,8 @@ def _payload_from_mapping(data: Mapping[Any, Any]) -> CommitmentPayload:
     if burn_tx_hash and not burn_tx_hash.startswith("0x"):
         burn_tx_hash = f"0x{burn_tx_hash}"
     # `cid` absent or null → None → the caller reads the submission as
-    # (sim, seq=round_num). Present but unusable (`"cid":"banana"`) → 0, which
+    # (sim, seq=claimed_competition_seq). Present but unusable
+    # (`"cid":"banana"`) → 0, which
     # no `bigint GENERATED AS IDENTITY` primary key can ever be, so the season
     # lookup fails loudly. Degrading it to None instead would put a miner who
     # mistyped the season on the simulation leaderboard, with the entry fee
@@ -669,7 +677,7 @@ def _payload_from_mapping(data: Mapping[Any, Any]) -> CommitmentPayload:
         # see the asymmetry note in the module docstring.
         block_hash=_as_str(data.get("h")),
         hf_commit=_as_str(data.get("c")),
-        round_num=_as_int(data.get("r")),
+        claimed_competition_seq=_as_int(data.get("r")),
         hf_repo_id=_as_str(data.get("i")),
         burn_tx_hash=burn_tx_hash,
         burn_block=_as_int(data.get("bb")),

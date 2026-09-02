@@ -54,19 +54,19 @@ def test_stays_in_uint32_range() -> None:
 
 
 @pytest.mark.parametrize(
-    ("block_hash", "round_num", "drand_random"),
+    ("block_hash", "competition_id", "drand_random"),
     [
-        ("0x" + "11" * 32, 2, "22" * 32),  # only round changed
+        ("0x" + "11" * 32, 2, "22" * 32),  # only competition_id changed
         ("0x" + "12" * 32, 1, "22" * 32),  # only block_hash changed
         ("0x" + "11" * 32, 1, "23" * 32),  # only drand randomness changed
     ],
 )
 def test_every_input_participates(
-    block_hash: str, round_num: int, drand_random: str
+    block_hash: str, competition_id: int, drand_random: str
 ) -> None:
     """All three arguments really do go into the hash — if any one of them
     changes, the seed must change."""
-    assert derive_seed(block_hash, round_num, drand_random) != DOC_SEED
+    assert derive_seed(block_hash, competition_id, drand_random) != DOC_SEED
 
 
 def test_inputs_are_not_normalised() -> None:
@@ -91,7 +91,7 @@ def test_separator_is_part_of_the_message() -> None:
 
 
 def test_no_input_validation() -> None:
-    """An empty string / round 0 does not raise; it still produces a uint32.
+    """An empty string / competition_id 0 does not raise; it still produces a uint32.
 
     This is the **current behaviour**, not a good idea by design: it means that
     when an upstream caller forgets to pass a field nothing blows up, a
@@ -121,16 +121,16 @@ def test_drand_round_url_for_a_recorded_round() -> None:
 
 
 def test_drand_round_url_defaults_to_latest() -> None:
-    """No round given means the latest round."""
+    """No argument means the latest drand_round."""
     assert drand_round_url() == f"{DRAND_API}/{DRAND_CHAIN_HASH}/public/latest"
     assert drand_round_url("latest") == drand_round_url()
 
 
 @pytest.mark.parametrize("bad_round", [0, -1, "6347967", "", "LATEST", 1.0])
-def test_drand_round_url_rejects_non_rounds(bad_round: object) -> None:
-    """The negative cases that must be rejected: 0 is the sentinel value for "no
-    round computed yet"; string rounds, floats and negative numbers are not
-    rounds either."""
+def test_drand_round_url_rejects_non_drand_rounds(bad_round: object) -> None:
+    """The negative cases that must be rejected: 0 is the sentinel for "no
+    drand_round computed yet"; strings, floats and negative numbers are not
+    drand_rounds either."""
     with pytest.raises(ValueError, match="positive integer"):
         drand_round_url(bad_round)  # type: ignore[arg-type]
 
