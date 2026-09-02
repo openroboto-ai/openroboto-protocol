@@ -4,10 +4,15 @@ name: Release
 # 这个包发不出去的代价（写在这里，因为改这个文件的人需要知道自己在拆什么）
 #
 # openroboto-protocol 是红线区的唯一真源：种子派生、模型指纹、状态词表、响应信封。
-# 它装不上，消费方就只能抄。今天 openroboto-backend 里就留着 3 处手抄副本 ——
+# 它装不上，消费方就只能抄。openroboto-backend 里曾经留着 3 处手抄副本 ——
 # app/domain/worker_reports.py · app/domain/reasons.py · app/api/envelope.py 的复制段 ——
-# 全靠防漂测试守着，而 backend CI 里那条 "Protocol version is pinned" 至今空转，
+# 全靠防漂测试守着，而 backend CI 里那条 "Protocol version is pinned" 空转，
 # 因为依赖表里根本还没有这个包。
+#
+# 2026-08-19/20 这条路径关掉了：三处副本全改成 import，两个消费仓都从 PyPI 装并钉死
+# 精确版本（backend 0.10.0 / cli 0.9.0），两边的 "No vendored protocol copy" 与
+# "Protocol version is pinned" 都在真的东西上跑。**这个 workflow 是那件事的前提** ——
+# 它一停，消费方就又只能抄。
 #
 # "手抄副本会漂"不是假设：protocol/types.py 漂过 105 行，payment.py 漂过 313 行，
 # 结果是矿工按 A 编码、后端按 B 解码，**两边都不报错**，直到有人去查为什么

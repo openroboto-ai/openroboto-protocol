@@ -6,10 +6,11 @@ name = "openroboto-protocol"
 # `test_quoted_pin_examples_do_not_drift` 把这一行也扫进去了，所以这个例子
 # 不会再像 0.2.0 那样被落下五个版本。
 #
-# **停在 0.x 是裁决，不是拖延**：backend 和 cli 都还没钉上线版本，也还没真正
-# import 过这个包，冻结版本号只会冻住它碰巧长成的形状。1.0.0 的四条前置条件
-# 写在 AGENTS.md §1② 的可勾清单里。0.x 阶段不承诺兼容，所以像本轮
-# （0.1.0 → 0.2.0）这样收紧 schemas 的哨兵默认值是允许的。
+# **停在 0.x 是裁决，不是拖延**：backend 和 cli 现在都真的装并 import 了这个包，
+# 但钉的版本差一个 minor（backend `==0.10.0`、cli `==0.9.0`），「上线版本」还没
+# 谈拢，冻结版本号只会冻住它碰巧长成的形状。1.0.0 的四条前置条件写在
+# AGENTS.md §1② 的可勾清单里（第 2、3 条已完成）。0.x 阶段不承诺兼容，所以像
+# 0.1.0 → 0.2.0 那样收紧 schemas 的哨兵默认值是允许的。
 #
 # ⚠️ 0.1.0 已经发到 PyPI（2026-08-19，OIDC）。PyPI 版本号不可重用，只能往前发。
 version = "0.10.0"
@@ -58,7 +59,7 @@ Changelog = "https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHAN
 # 不该被迫在 GPU 机器上编译一个 pydantic-core 轮子。
 # `__init__.py` 不 re-export 任何东西，所以 `import openroboto_protocol` 永远不会
 # 触发 `import pydantic` —— 零依赖承诺靠这一条成立，不是靠自觉
-# （`tests/test_schemas.py::test_package_import_does_not_require_pydantic` 钉住）。
+# （`tests/test_schemas.py::test_miner_facing_imports_do_not_require_pydantic` 钉住）。
 #
 # 为什么 schemas 又值得用 pydantic（而不是继续用 stdlib dataclass）：
 # 后端是 FastAPI，dataclass 版本有一个**实测出来的天花板** —— 违例只能在

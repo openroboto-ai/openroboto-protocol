@@ -80,10 +80,11 @@ def test_version_and_the_compatibility_promise_move_together() -> None:
     0.x"). That changed on 2026-08-19: 0.x is allowed, but the documentation
     **must** state that compatibility is not promised during this period. The
     reason is that `openroboto-backend` and `openroboto-cli` have not settled on
-    the versions they go live with — today the two of them cannot even install
-    this package (the backend still keeps 3 hand-copied duplicates). Freezing a
-    version number on a contract that has never actually been consumed freezes
-    the shape it **happens to have grown into**.
+    the versions they go live with — both install and import this package today
+    (the backend's 3 hand-copied duplicates were deleted on 2026-08-19/20), but
+    they are pinned a minor apart. Freezing a version number while the two sides
+    still resolve to different code freezes the shape it **happens to have grown
+    into**.
 
     So this test now guards two directions, and both of them are shapes that fail
     silently:

@@ -72,10 +72,12 @@ def derive_seed(block_hash: str, round_num: int, drand_random: str) -> int:
     case changes, no whitespace stripping. The block_hash stored in the
     production database is lowercase hex with the ``0x``; the drand randomness
     is lowercase hex without a prefix; a different spelling is a different seed.
+
+    Since 0.9.0 the second argument is the competition id (``competitions.id``),
+    not a round number; the parameter name is kept for compatibility.
     """
     # The three lines below are word-for-word identical to
-    # prototype/backend/seed.py:26 and to the public repo
-    # openroboto-cli/protocol/seed.py:18.
+    # prototype/backend/seed.py:26.
     # `.encode()` and `.encode("utf-8")` produce the same bytes, and UP012 wants
     # us to drop the argument — but keeping it word for word is what makes it
     # obvious at a glance that extracting this package "only moved things, it

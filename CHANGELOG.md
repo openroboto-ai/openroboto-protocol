@@ -75,7 +75,7 @@ worker 交还任务时说得出话了。此前 `stage` 的四个词全是「正�
 ## 0.9.0 — 2026-08-27
 
 **`round_num` is removed from six response models.** Breaking, on purpose, and the
-on-chain encoding does not move: `commitment.py` is untouched and all 149 golden
+on-chain encoding does not move: `commitment.py` is untouched and all 122 golden
 vectors are green.
 
 Gone from `QueueTask` · `ScoreSubmission` · `SubmissionRecord` · `QueueStatusTask` ·
@@ -126,9 +126,10 @@ behaves exactly as before.
 
 ### `openroboto-backend` / `openroboto-cli`: re-pin, then two follow-ups
 
-The backend already serves the field (migration `0014`); until the pin here moves
-to `0.8.0` the CLI's `Contract` base (`extra=ignore`) silently drops it on the way
-in, so **the CLI cannot see it no matter what the backend sends**. After re-pinning:
+The backend already serves the field (migration `0014`); until the pin there moved
+to `0.8.0` the CLI's `Contract` base (`extra=ignore`) silently dropped it on the way
+in, so **the CLI could not see it no matter what the backend sent**. The CLI is on
+`0.9.0` now, so the field arrives. After re-pinning:
 
 - `openroboto init` must copy `base_model_family` into `miner.yaml`'s
   `competition:` block (`commands/init.py`'s `SECTION_KEYS`). Its
@@ -319,9 +320,9 @@ payload written by software they run.
   emissions reach the chain (`{hotkey: share}` → `(uid, u16)`). It existed twice,
   in the backend's `chain_writer` and in the CLI's `chain/weights`, with nothing
   comparing them.
-- Consumers: both copies are meant to be deleted once this version is installed.
-  Each repository carries a test that turns red the moment the package gains the
-  module and states the three steps.
+- Consumers: both copies were deleted on 2026-08-21, once this version was
+  installed. Each repository carried a test that turned red the moment the package
+  gained the module and stated the three steps; those tests went with the copies.
 - Three details are load-bearing and must not be "cleaned up": strict `w > 0`,
   divide-before-multiply, and `int()` truncation rather than rounding. On-chain
   snapshot 122 is the evidence — `0.9 * 65535` is exactly 58981.5, `int` gives

@@ -59,21 +59,28 @@ dependencies = []   # 保持这样
 >   于是任何改动都能被论证成不破坏任何人 —— review 时 `major` 和 `minor` 的分界线
 >   没有判据可依，那张表只是三行好听的话。
 >
-> - [ ] **backend 的 3 处手抄副本删干净，改成从子模块 import。**
->   `app/api/envelope.py`（345 行）· `app/domain/reasons.py`（244 行）·
->   `app/domain/worker_reports.py`（316 行），合计 905 行。
->   这个包唯一的卖点是"两边装的能被证明是同一份"。副本还在，这句话**字面为假**。
->   更糟的是守副本的 parity 测试（`test_envelope_parity` / `test_worker_reports` /
->   `test_worker_contract_parity` 等五个文件）在协议包缺失时**整体 skip** ——
->   backend 的 CI 今天是绿的，而那份绿什么都没证明。
->   1.0 冻结的必须是一份**真被 import 过**的形状。
+>   **2026-09-02 现状**：两边都是精确 pin，但差一个 minor ——
+>   backend `pyproject.toml:42` `openroboto-protocol[schemas]==0.10.0`（生产自 08-22 跑这一版），
+>   cli `pyproject.toml:40` 把同一个包钉在 `0.9.0`（已发 PyPI `openroboto` 1.2.0）。
+>   （这里不写完整的 `包名==版本` 字面量：`test_quoted_pin_examples_do_not_drift`
+>   会把它当成本仓的 pin 示例，而它讲的是别人的 pin。）
+>   ⏳ **是否算「钉死上线版本」待裁决**：两边各自钉死就够，还是必须同一个数字？
+>   在裁决之前这个框不勾。
 >
-> - [~] **`normalize_weights` 收进本包**（✅ 0.4.0 `weights.py`）**，两边的副本删掉**（⏳ 等 0.4.0 发布）。
->   今天两份：`openroboto-backend/app/services/chain_writer.py:82` 和
->   `openroboto-cli/src/openroboto/chain/weights.py:31`。
->   这是链上排放的**最后一道换算**，而它根本不在这个包的表面上 ——
+> - [x] **backend 的 3 处手抄副本删干净，改成从子模块 import。**（✅ 2026-08-19/20）
+>   `app/api/envelope.py` · `app/domain/reasons.py` · `app/domain/worker_reports.py`
+>   三处都已改成 `from openroboto_protocol...` import（另加 `app/services/legacy_views.py`）。
+>   守副本的 parity 测试连同副本一起删了（`test_envelope_parity.py`，`3322338`）——
+>   它们在协议包缺失时**整体 skip**，backend 的 CI 那份绿什么都没证明。
+>   现在协议包是硬依赖，1.0 要冻结的已经是一份**真被 import 过**的形状。
+>
+> - [x] **`normalize_weights` 收进本包**（✅ 0.4.0 `weights.py`）**，两边的副本删掉**（✅ 2026-08-21）。
+>   曾经有两份：`openroboto-backend/app/services/chain_writer.py` 和
+>   `openroboto-cli/src/openroboto/chain/weights.py`，两边现在都是
+>   `from openroboto_protocol.weights import normalize_weights`。
+>   这是链上排放的**最后一道换算**，而它一度根本不在这个包的表面上 ——
 >   1.0 的兼容承诺覆盖不到子网最关键的那一步。
->   两份今天数值一致（2010 组输入实测 0 分歧，含链上快照 122），但**没有任何东西
+>   两份当时数值一致（2010 组输入实测 0 分歧，含链上快照 122），但**没有任何东西
 >   守着它继续一致**：返回类型（`tuple` vs `NormalizedWeights` dataclass）、
 >   上限常量（字面量 `65535` vs 具名 `U16_MAX`）、日志语言、参数名
 >   （`uids` vs `hotkeys`）已经各走各的，测试也是两套独立的；而"快照里有、
@@ -87,19 +94,21 @@ dependencies = []   # 保持这样
 >   `int` 给 58981、`round` 给 58982 —— 改成 `round()` 会直接改掉一个历史值。
 >
 >   ✅ **2026-08-20：模块已落地**（`weights.py`，0.4.0），错例没搬进来、正确的
->   那个（快照 122）进了 docstring 和用例。**副本要等 0.4.0 发布才能删** ——
+>   那个（快照 122）进了 docstring 和用例。
+>   ✅ **2026-08-21：两份副本已删**。删除的触发器按设计生效了 ——
 >   两个消费仓各留了一条**会自己到期**的用例（`test_protocol_weight_parity.py`）：
->   协议包一带上 `weights` 就变红，并在报错里写清要做哪三件事。
+>   协议包一带上 `weights` 就变红，并在报错里写清要做哪三件事；副本删掉之后
+>   这两个用例本身也随之删除，两仓都不再有它。
 >   写成用例而不是注释，是因为上一条同样形状的待办
 >   （cli 的 `burn_block_window`「等 0.3.0 发布」）**0.3.0 第二天就发了而没人回头看**。
 >
 > - [ ] **每个模块声明 `__all__`，并有一条测试钉住这张表。**
->   今天只有 `schemas.py`（72 项）和 `weights.py`（3 项）有，`constants` / `status` / `seed` /
->   `model_hash` / `model_format` / `commitment` **6 个模块一个都没有**。
+>   8 个模块里 **5 个已有**：`commitment` / `model_format` / `status` / `schemas` / `weights`；
+>   **还差 3 个**：`constants` / `seed` / `model_hash`。
 >   SemVer 承诺的对象是"公开表面"。表面没有定义，`patch`（行为不变）和
 >   `major`（破坏性）之间就没有判据 —— 删掉 `status.py` 里一个没人知道算不算
 >   公开的辅助函数，算哪一种？`tests/test_schemas.py::test_every_exported_model_is_pinned`
->   已经是这条的样板，补的是其余 6 个模块。
+>   已经是这条的样板，补的是其余 3 个模块。
 >   **顶层 `__init__.py` 的 `__all__` 保持空**：消费方一律从子模块 import
 >   （见下面「导入形状」）。
 >
@@ -174,6 +183,10 @@ tests/
 ├── test_golden_vectors.py    链上事实，改了就是改历史
 └── test_<module>.py          镜像 src/ 结构
 docs/
+├── audits/           一次性核查报告，编号
+├── plans/            一次性计划，编号
+├── releases/         对消费方的发版通知稿
+└── runbooks/         可重复的流程（发版…）
 ```
 
 **一个模块一个契约。** 判断某段代码该不该进来，只有一个标准：
@@ -204,8 +217,9 @@ git tag v1.0.1 && git push origin v1.0.1     发布的唯一动作
     外部验证者、以及任何 `pip install` 之后点进源码的人。
     中文注释对他们等于没有注释，而这两个包的注释本身就是主要资产
     （"为什么不能改回去" 那类信息，代码本身表达不了）。
-    ⚠️ 判据是**会不会公开**，不是**此刻是不是 public**：`openroboto-cli`
-    现在私有、上线时转公开，按公开写，免得到时候整仓重来一遍。
+    ⚠️ 判据是**会不会公开**，不是**此刻是不是 public**。`openroboto-cli`
+    曾经私有、按"上线时会转公开"来写英文，现在它确实已经是 public（PyPI `openroboto`）——
+    当初没图省事写中文，省掉了整仓重来一遍。
   - **私有仓（`openroboto-backend`）：注释与文档用中文，commit message 仍然英文。**
     读它的只有团队，中文的信息密度更高；而 commit 是跨仓、对外、且改不动的那一层
     （`git log` / PR 列表 / release notes 会被外部消费者读到，改它要重写历史）。
