@@ -1027,18 +1027,13 @@ class SubmissionRecord(Contract):
     scores again** → hits the terminal-state guard / the unique index → 500 → checks
     again → retries again.
 
-    🔴 **A confirmed silent failure**: the worker only accepts
-    `status ∈ {"done","scored","failed"}`, while the backend now writes `evaluated` /
-    `eval_failed`, and since 0002 `done` has been forbidden by a CHECK.
-    That `unified_to_legacy_score()` in `protocol/status.py` writes the conversion but
-    is called from nowhere. The inference is that the check is **currently always
-    False**, and there is no alert anywhere on this path (the worker only logs a
-    warning, and that log is on the evaluation party's machine). **No conversion is done
-    here, deliberately** — both fixes (the backend converting to `done` at the exit /
-    asking the evaluation party to accept `evaluated`) need a human ruling, see spec 07
-    §10 Q2.
-    ⚠️ When this lands, **keep a conversion function and mark it TODO**; do not hide the
-    vocabulary disagreement inside a query.
+    🔴 **`status` carries the eight storable words verbatim** (`STORABLE_STATUSES`),
+    and **no alias conversion happens at this endpoint** (ruled 2026-09-02). The
+    worker's storage check only accepts `done` / `scored` / `failed`, so it is
+    currently always False, and there is no alert on this path (the worker logs a
+    warning, on the evaluation party's machine). Closing that gap is the evaluation
+    party's side of the contract; hiding a translation table inside our query is what
+    ZCY-158 already cost us.
 
     When not found it returns **200 plus `{}`**, not a 404: for the worker a 404 is
     permanent and would let it take "the task does not exist" as a reason to abandon a
@@ -1072,44 +1067,33 @@ class SubmissionRecord(Contract):
 
 
 #: The only three words the worker's storage check accepts (`worker.py:553`).
-#: This is **only a record** here, no conversion is done — see the TODO in the function
-#: below.
+#:
+#: ⚠️ **Deprecated, kept only as a record of what the other side accepts.** The
+#: ruling of 2026-09-02 is that `GET /api/submission/{task_id}` emits the eight
+#: storable words with no conversion, so nothing here consumes this set. It stays
+#: because `openroboto-backend/tests/test_worker_contract_parity.py` imports it to
+#: assert that the two vocabularies really do disagree; it goes when that test does.
 WORKER_ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
     {"done", "scored", "failed"}
 )
 
 
 def worker_status_alias(status: str) -> str:
-    """Canonical status word → the old word the worker knows. **⚠️ Nothing calls this
-    today, and that is deliberate.**
+    """Canonical status word → the older word the worker knows.
 
-    TODO(wire up after the ruling): which set of words the `status` of
-    `GET /api/submission/{task_id}` actually emits is a **blocking open question**
-    (spec 07 §10 Q2), and both roads need a human ruling:
+    ⚠️ **Deprecated, and nothing in the protocol calls it.** Ruled 2026-09-02:
+    `GET /api/submission/{task_id}` emits the words in `STORABLE_STATUSES` verbatim
+    and performs **no alias conversion**. Wiring this into a query would hide a
+    vocabulary disagreement inside a lookup, which is exactly what ZCY-158 cost us
+    (the translation table lived in the consumer, so nobody knew the two sides did
+    not match).
 
-    (a) The backend calls this function at that endpoint's exit and emits
-        `evaluated → done`. That is a fix for the worker and a breaking change for
-        everyone else reading this endpoint.
-    (b) Ask the evaluation party to add `evaluated` / `eval_failed` on the worker side.
-        That needs their cooperation, and `SCOPE.md` states "we do not decide their
-        integration schedule for them".
-
-    Before the ruling, `SubmissionRecord.status` **emits the canonical word from the DB
-    verbatim**. This function sits here instead of being wired secretly into a query so
-    that the vocabulary disagreement stays out in the open — the lesson of ZCY-158 is
-    that the translation table got hidden inside the consumer (the worker's
-    `_PROGRESS_STAGE_MAP` is still there today), so nobody knew the two sides did not
-    actually match.
-
-    Background (inferred, not measured): the worker's check is **currently always
-    False**. The backend now writes `evaluated` / `eval_failed`, and since 0002 `done`
-    has been forbidden by a CHECK. So every POST /score timeout or 5xx walks the full
-    retry path, and there is no alert anywhere on this path — the worker only calls
-    `logger.warning`, and that log is on the evaluation party's machine.
+    It survives only because `openroboto-backend`'s worker-contract parity test
+    imports it to show the mapping the evaluation party would have to apply on their
+    side. Delete it together with that test.
 
     Status words not in the table are **returned verbatim**, the same way
-    `status.normalize_status()` does it: this function is not responsible for judging
-    legality, that is `ALL_STATUSES`'s job.
+    `status.normalize_status()` does: judging legality is `ALL_STATUSES`'s job.
     """
     return {"evaluated": "done", "eval_failed": "failed"}.get(status, status)
 

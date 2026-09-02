@@ -963,21 +963,22 @@ def test_worker_status_words_are_not_what_the_backend_writes() -> None:
     cross-check is **always False** → every timeout or 5xx on POST /score goes
     through the full retry path, and there is no alert anywhere along that chain.
 
-    This test **does not claim which side is right**, it claims "this is really
-    the case today" — once spec 07 §10 Q2 is settled, what changes is this test
-    and the wiring of `worker_status_alias`.
+    Ruled 2026-09-02: the endpoint emits the storable words verbatim and does no
+    conversion, so closing the gap is the evaluation party's side of the contract.
+    This test pins that the two vocabularies really are disjoint.
     """
     assert s.WORKER_ACCEPTED_STATUSES & ALL_STATUSES == frozenset()
 
 
-def test_worker_status_alias_is_defined_but_deliberately_unwired() -> None:
-    """The conversion function is in place, carries a TODO, but **no model calls
-    it**.
+def test_worker_status_alias_is_deprecated_and_stays_unwired() -> None:
+    """The conversion function still computes the right mapping, and **no model
+    calls it** — ruled 2026-09-02.
 
     Keeping it out in the open instead of quietly wiring it into a query: the
     lesson of ZCY-158 is that the translation table was hidden inside the
     consumer (the worker's `_PROGRESS_STAGE_MAP` is still there today), so nobody
-    knew the two sides did not actually match.
+    knew the two sides did not actually match. It is deprecated and goes when
+    `openroboto-backend`'s worker-contract parity test, its only importer, goes.
     """
     assert s.worker_status_alias("evaluated") == "done"
     assert s.worker_status_alias("eval_failed") == "failed"
@@ -985,8 +986,8 @@ def test_worker_status_alias_is_defined_but_deliberately_unwired() -> None:
     # `ALL_STATUSES`, it is not this function's business.
     assert s.worker_status_alias("superseded") == "superseded"
     assert s.worker_status_alias("whatever") == "whatever"
-    # Not wired up: the detail response still emits the canonical word straight
-    # from the database.
+    # Not wired up: the detail response emits the storable word straight from the
+    # database.
     assert _submission_record(status="evaluated").status == "evaluated"
 
 
