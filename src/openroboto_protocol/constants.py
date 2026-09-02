@@ -21,6 +21,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+#: The public surface of this module. What is not listed here is an
+#: implementation detail and may change in a patch release — without it there is
+#: no line between `patch` and `major` (AGENTS.md §1②).
+__all__ = [
+    "BURN_BLOCK_WINDOW",
+    "CHAMPION_MARGIN",
+    "DRAND_DEFAULT_CHAIN",
+    "LIBERO_TASK_SUITES",
+    "REQUIRED_ENVS",
+    "TOP_K",
+    "TOP_K_EMISSION",
+    "TOP_K_EMISSION_WEIGHTS",
+    "DrandBeacon",
+    "EmissionWeights",
+]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Emission weights
 # ─────────────────────────────────────────────────────────────────────────────

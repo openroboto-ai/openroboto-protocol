@@ -7,6 +7,7 @@ import hashlib
 
 import pytest
 
+from openroboto_protocol import model_hash
 from openroboto_protocol.model_hash import (
     extract_lfs_sha256,
     fingerprint_lfs_sha256,
@@ -120,3 +121,20 @@ def test_repo_without_lfs_files_has_no_fingerprint() -> None:
     that basis, it is not "the fingerprint happens to be empty"."""
     tree = [{"type": "file", "size": 12, "path": "README.md"}]
     assert model_hash_from_hf_tree(tree) == ""
+
+
+def test_public_surface_is_pinned() -> None:
+    """`__all__` is the module's public surface, and SemVer promises about that
+    surface — with no list written down, `patch` (behaviour unchanged) and `major`
+    (breaking) have no boundary between them.
+
+    The two lower-level functions are exported on purpose: a caller that needs to
+    fingerprint a narrowed set of files assembles it from `extract_lfs_sha256` and
+    `fingerprint_lfs_sha256` rather than getting a new entry point here.
+    """
+    assert set(model_hash.__all__) == {
+        "extract_lfs_sha256",
+        "fingerprint_lfs_sha256",
+        "model_hash_from_hf_tree",
+    }
+    assert all(hasattr(model_hash, name) for name in model_hash.__all__)

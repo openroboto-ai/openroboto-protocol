@@ -47,6 +47,15 @@ import hashlib
 from collections.abc import Iterable, Mapping
 from typing import Any, Final
 
+#: The public surface of this module. What is not listed here is an
+#: implementation detail and may change in a patch release — without it there is
+#: no line between `patch` and `major` (AGENTS.md §1②).
+__all__ = [
+    "extract_lfs_sha256",
+    "fingerprint_lfs_sha256",
+    "model_hash_from_hf_tree",
+]
+
 # The three parameters of the fingerprint algorithm. Changing any one of them =
 # every historical fingerprint on chain becomes void, and the plagiarism
 # judgement goes wrong along with it. Touching them requires a major bump plus a

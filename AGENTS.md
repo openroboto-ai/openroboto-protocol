@@ -64,20 +64,19 @@ Before adding a dependency, ask whether a miner's environment should pay for it.
 > nice-to-have: without any one of them, the bump table above is an instruction
 > nobody can carry out.
 >
-> - [ ] **`openroboto-backend` and `openroboto-cli` each pin the version they go
->   live with.** `major` means "breaking, needs a migration plan". With no launch
->   version there is no party to migrate, so any change can be argued to break
->   nobody — and at review time the line between `major` and `minor` has no
->   criterion behind it.
+> - [x] **`openroboto-backend` and `openroboto-cli` each pin the version they go
+>   live with.** (✅ ruled 2026-09-02) `major` means "breaking, needs a migration
+>   plan". With no launch version there is no party to migrate, so any change can
+>   be argued to break nobody — and at review time the line between `major` and
+>   `minor` has no criterion behind it.
 >
->   **2026-09-02**: both pin exactly, but a minor apart — the backend pins
->   `openroboto-protocol[schemas]` at 0.10.0 (production has run that since
->   08-22), the CLI pins the same package at 0.9.0 (published as PyPI
->   `openroboto` 1.2.0). (No full `name==version` literal here:
+>   The ruling is that **each consumer pins the latest release**; they do not have
+>   to be on the same number at the same moment. So "each pins its launch version"
+>   is what this box asks for, and both do: the backend pins
+>   `openroboto-protocol[schemas]`, the CLI pins the same package without the
+>   extra. (No full `name==version` literal here:
 >   `test_quoted_pin_examples_do_not_drift` would read it as this repo's own pin
 >   example, and it is somebody else's pin.)
->   ⏳ **Undecided**: is "each pins its launch version" enough, or must it be the
->   same number? The box stays unticked until that is ruled on.
 >
 > - [x] **The backend's 3 hand-copied mirrors are gone, replaced by submodule
 >   imports.** (✅ 2026-08-19/20) `app/api/envelope.py` · `app/domain/reasons.py` ·
@@ -118,9 +117,10 @@ Before adding a dependency, ask whether a miner's environment should pay for it.
 >   because the previous to-do of that shape (the CLI's `burn_block_window`,
 >   "waiting for 0.3.0") was released the next day and nobody came back to it.
 >
-> - [ ] **Every module declares `__all__`, with a test pinning the list.**
->   5 of 8 have it: `commitment` / `model_format` / `status` / `schemas` /
->   `weights`; **3 to go**: `constants` / `seed` / `model_hash`.
+> - [x] **Every module declares `__all__`, with a test pinning the list.**
+>   (✅ 0.11.0) All 8: `commitment` / `constants` / `model_format` / `model_hash` /
+>   `schemas` / `seed` / `status` / `weights`, each with a
+>   `test_public_surface_is_pinned` case.
 >   What SemVer promises about is the public surface. With no surface defined
 >   there is no criterion between `patch` (behaviour unchanged) and `major`
 >   (breaking) — delete a helper in `status.py` that nobody knows is public or
@@ -128,6 +128,11 @@ Before adding a dependency, ask whether a miner's environment should pay for it.
 >   `tests/test_schemas.py::test_every_exported_model_is_pinned` is the template.
 >   **The top-level `__init__.py` keeps an empty `__all__`**: consumers import
 >   from submodules only (see "Import shape" below).
+>
+> 🔴 **As of 0.11.0 all four boxes are ticked, so 1.0.0 is now a decision, not a
+> blocker.** It is the owner's call and nobody else's: it withdraws the "no
+> compatibility promised" line and puts the bump table above into force. Until
+> that call is made the version stays `0.x` and the warning stays with it.
 >
 > Once 1.0 is out there is **no going back to `0.x`**: that withdraws a promise
 > already in force, and a consumer pinned with `==` will not find out by itself.
