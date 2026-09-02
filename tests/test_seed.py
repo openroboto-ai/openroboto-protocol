@@ -12,6 +12,7 @@ import dataclasses
 
 import pytest
 
+from openroboto_protocol import seed as seed_module
 from openroboto_protocol.seed import (
     DRAND_API,
     DRAND_CHAIN_HASH,
@@ -26,21 +27,21 @@ from openroboto_protocol.seed import (
 # openroboto-cli/docs/SEED_GENERATION.md. Like the golden vectors it is a public
 # commitment, and it must not be deleted just because it "looks like filler".
 DOC_BLOCK_HASH = "0x" + "11" * 32
-DOC_ROUND = 1
+DOC_COMPETITION_ID = 1
 DOC_DRAND = "22" * 32
 DOC_SEED = 3898936287
 
 
 def test_documented_example() -> None:
     """That assert in the public document has to keep holding, forever."""
-    assert derive_seed(DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND) == DOC_SEED
+    assert derive_seed(DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND) == DOC_SEED
 
 
 def test_is_deterministic() -> None:
     """Same input, same output — no time, no randomness, no environment
     variables involved."""
-    first = derive_seed(DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND)
-    second = derive_seed(DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND)
+    first = derive_seed(DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND)
+    second = derive_seed(DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND)
     assert first == second
 
 
@@ -54,19 +55,19 @@ def test_stays_in_uint32_range() -> None:
 
 
 @pytest.mark.parametrize(
-    ("block_hash", "round_num", "drand_random"),
+    ("block_hash", "competition_id", "drand_random"),
     [
-        ("0x" + "11" * 32, 2, "22" * 32),  # only round changed
+        ("0x" + "11" * 32, 2, "22" * 32),  # only competition_id changed
         ("0x" + "12" * 32, 1, "22" * 32),  # only block_hash changed
         ("0x" + "11" * 32, 1, "23" * 32),  # only drand randomness changed
     ],
 )
 def test_every_input_participates(
-    block_hash: str, round_num: int, drand_random: str
+    block_hash: str, competition_id: int, drand_random: str
 ) -> None:
     """All three arguments really do go into the hash — if any one of them
     changes, the seed must change."""
-    assert derive_seed(block_hash, round_num, drand_random) != DOC_SEED
+    assert derive_seed(block_hash, competition_id, drand_random) != DOC_SEED
 
 
 def test_inputs_are_not_normalised() -> None:
@@ -91,7 +92,7 @@ def test_separator_is_part_of_the_message() -> None:
 
 
 def test_no_input_validation() -> None:
-    """An empty string / round 0 does not raise; it still produces a uint32.
+    """An empty string / competition_id 0 does not raise; it still produces a uint32.
 
     This is the **current behaviour**, not a good idea by design: it means that
     when an upstream caller forgets to pass a field nothing blows up, a
@@ -105,11 +106,11 @@ def test_no_input_validation() -> None:
 def test_verify_seed_accepts_and_rejects() -> None:
     """The auditor's direction: True when it matches, and False whenever any one
     of the inputs is mismatched."""
-    assert verify_seed(DOC_SEED, DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND)
-    assert not verify_seed(DOC_SEED + 1, DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND)
-    assert not verify_seed(DOC_SEED, DOC_BLOCK_HASH, DOC_ROUND + 1, DOC_DRAND)
-    assert not verify_seed(DOC_SEED, "0x" + "99" * 32, DOC_ROUND, DOC_DRAND)
-    assert not verify_seed(DOC_SEED, DOC_BLOCK_HASH, DOC_ROUND, "99" * 32)
+    assert verify_seed(DOC_SEED, DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND)
+    assert not verify_seed(DOC_SEED + 1, DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND)
+    assert not verify_seed(DOC_SEED, DOC_BLOCK_HASH, DOC_COMPETITION_ID + 1, DOC_DRAND)
+    assert not verify_seed(DOC_SEED, "0x" + "99" * 32, DOC_COMPETITION_ID, DOC_DRAND)
+    assert not verify_seed(DOC_SEED, DOC_BLOCK_HASH, DOC_COMPETITION_ID, "99" * 32)
 
 
 def test_drand_round_url_for_a_recorded_round() -> None:
@@ -121,16 +122,16 @@ def test_drand_round_url_for_a_recorded_round() -> None:
 
 
 def test_drand_round_url_defaults_to_latest() -> None:
-    """No round given means the latest round."""
+    """No argument means the latest drand_round."""
     assert drand_round_url() == f"{DRAND_API}/{DRAND_CHAIN_HASH}/public/latest"
     assert drand_round_url("latest") == drand_round_url()
 
 
 @pytest.mark.parametrize("bad_round", [0, -1, "6347967", "", "LATEST", 1.0])
-def test_drand_round_url_rejects_non_rounds(bad_round: object) -> None:
-    """The negative cases that must be rejected: 0 is the sentinel value for "no
-    round computed yet"; string rounds, floats and negative numbers are not
-    rounds either."""
+def test_drand_round_url_rejects_non_drand_rounds(bad_round: object) -> None:
+    """The negative cases that must be rejected: 0 is the sentinel for "no
+    drand_round computed yet"; strings, floats and negative numbers are not
+    drand_rounds either."""
     with pytest.raises(ValueError, match="positive integer"):
         drand_round_url(bad_round)  # type: ignore[arg-type]
 
@@ -147,7 +148,7 @@ def test_drand_chain_hash_is_quicknet() -> None:
 def test_seed_inputs_derive_matches_function() -> None:
     """The dataclass only binds the three fields together; the derived result
     must be identical to calling the function directly."""
-    inputs = SeedInputs(DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND)
+    inputs = SeedInputs(DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND)
     assert inputs.derive() == DOC_SEED
     assert inputs.verify(DOC_SEED)
     assert not inputs.verify(DOC_SEED + 1)
@@ -156,7 +157,7 @@ def test_seed_inputs_derive_matches_function() -> None:
 def test_seed_inputs_is_frozen() -> None:
     """Once the seed inputs are recorded they are history, and rewriting them in
     place is not allowed."""
-    inputs = SeedInputs(DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND)
+    inputs = SeedInputs(DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND)
     with pytest.raises(dataclasses.FrozenInstanceError):
         inputs.block_hash = "0x00"  # type: ignore[misc]
 
@@ -164,9 +165,29 @@ def test_seed_inputs_is_frozen() -> None:
 def test_seed_inputs_compares_by_value() -> None:
     """Same-origin checks rely on value equality, not object identity; they can
     go into a set or be used as a dict key."""
-    a = SeedInputs(DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND)
-    b = SeedInputs(DOC_BLOCK_HASH, DOC_ROUND, DOC_DRAND)
-    c = SeedInputs(DOC_BLOCK_HASH, DOC_ROUND + 1, DOC_DRAND)
+    a = SeedInputs(DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND)
+    b = SeedInputs(DOC_BLOCK_HASH, DOC_COMPETITION_ID, DOC_DRAND)
+    c = SeedInputs(DOC_BLOCK_HASH, DOC_COMPETITION_ID + 1, DOC_DRAND)
     assert a == b
     assert a != c
     assert len({a, b, c}) == 2
+
+
+def test_public_surface_is_pinned() -> None:
+    """`__all__` is the module's public surface, and SemVer promises about that
+    surface — with no list written down, `patch` (behaviour unchanged) and `major`
+    (breaking) have no boundary between them.
+
+    This is the reddest module in the package: everything named here is something a
+    miner or an auditor can recompute a historical seed with.
+    """
+    assert set(seed_module.__all__) == {
+        "DRAND_API",
+        "DRAND_CHAIN_HASH",
+        "SEED_MAX",
+        "SeedInputs",
+        "derive_seed",
+        "drand_round_url",
+        "verify_seed",
+    }
+    assert all(hasattr(seed_module, name) for name in seed_module.__all__)

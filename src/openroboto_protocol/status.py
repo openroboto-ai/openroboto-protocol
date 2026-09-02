@@ -121,8 +121,8 @@ STATUS_BURN_PASSED: Final[str] = "burn_passed"
 STATUS_PENDING: Final[str] = "pending"
 
 # Seed dispatch failed (drand could not be reached). **Retryable**, not terminal — the
-# chain scanner retries once at the end of every round, and on success it goes back to
-# pending. While drand is unavailable it is better to be stuck than to degrade into
+# chain scanner retries once at the end of every scan pass, and on success it goes back
+# to pending. While drand is unavailable it is better to be stuck than to degrade into
 # deriving the seed from block_hash alone, otherwise historical evaluations are not
 # reproducible (spec §5).
 STATUS_SEED_FAILED: Final[str] = "seed_failed"
@@ -137,10 +137,10 @@ STATUS_EVALUATED: Final[str] = "evaluated"
 # Evaluation failed (the worker errored / the model would not run). Terminal, no retry.
 STATUS_EVAL_FAILED: Final[str] = "eval_failed"
 
-# Rejected (bad burn / bad HF repo structure / duplicate submission / round mismatch).
+# Rejected (bad burn / bad HF repo structure / duplicate submission / wrong season).
 STATUS_REJECTED: Final[str] = "rejected"
 
-# A new version exists for the same (hotkey, round), so this one was pushed out.
+# A new version exists for the same (hotkey, season), so this one was pushed out.
 # ⚠️ The old `protocol/status.py`'s ALL_STATUSES **missed it**, and `is_terminal()`
 # returned False for it — there were zero consumers at the time so nothing broke; it is
 # added here (wrap-up item 7 of incident-20260814-context.md).

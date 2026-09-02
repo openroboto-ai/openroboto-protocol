@@ -4,7 +4,7 @@
 Contract meaning
 ----------------
 Two submissions with the same fingerprint = the same weights. The backend uses
-this to judge plagiarism: when two fingerprints collide within one round, the
+this to judge plagiarism: when two fingerprints collide within one season, the
 one with the earlier on-chain ``commit_block`` is the original and the later one
 is marked ``rejected``. So this algorithm must be independently recomputable by
 miners — if what they compute disagrees with the backend, it is the miner's
@@ -47,6 +47,15 @@ import hashlib
 from collections.abc import Iterable, Mapping
 from typing import Any, Final
 
+#: The public surface of this module. What is not listed here is an
+#: implementation detail and may change in a patch release — without it there is
+#: no line between `patch` and `major` (AGENTS.md §1②).
+__all__ = [
+    "extract_lfs_sha256",
+    "fingerprint_lfs_sha256",
+    "model_hash_from_hf_tree",
+]
+
 # The three parameters of the fingerprint algorithm. Changing any one of them =
 # every historical fingerprint on chain becomes void, and the plagiarism
 # judgement goes wrong along with it. Touching them requires a major bump plus a
@@ -68,7 +77,7 @@ def extract_lfs_sha256(lfs_field: object) -> str:
     huggingface_hub maps it the same way itself
     (``BlobLfsInfo(sha256=lfs["oid"])``). Both keys are accepted, ``sha256``
     taking precedence.
-    Evidence from real data: the tree response of the round 1 champion's repo
+    Evidence from real data: the tree response of the `(sim, 1)` champion's repo
     contains only ``oid``, so the ``or oid`` fallback is the **main path**, not
     defensive code.
 

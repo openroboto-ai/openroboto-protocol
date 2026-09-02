@@ -1,18 +1,21 @@
 [project]
 name = "openroboto-protocol"
-# 版本号**就是**契约版本（README「Versioning is a promise」），消费方钉死的是精确
-# 版本：`openroboto-protocol==0.10.0`。README 和 AGENTS.md 必须同步改 ——
-# `tests/test_version.py` 双向守着（钉版一致 + 0.x 必须写明「不承诺兼容」）：
-# `test_quoted_pin_examples_do_not_drift` 把这一行也扫进去了，所以这个例子
-# 不会再像 0.2.0 那样被落下五个版本。
+# The version number **is** the contract version (README, "Versioning is a promise"),
+# and consumers pin it exactly: `openroboto-protocol==0.11.0`. README and AGENTS.md
+# must be edited with it — `tests/test_version.py` guards both directions (pins agree
+# + 0.x must state that compatibility is not promised), and
+# `test_quoted_pin_examples_do_not_drift` scans this line too, so this example cannot
+# fall five versions behind the way it did at 0.2.0.
 #
-# **停在 0.x 是裁决，不是拖延**：backend 和 cli 都还没钉上线版本，也还没真正
-# import 过这个包，冻结版本号只会冻住它碰巧长成的形状。1.0.0 的四条前置条件
-# 写在 AGENTS.md §1② 的可勾清单里。0.x 阶段不承诺兼容，所以像本轮
-# （0.1.0 → 0.2.0）这样收紧 schemas 的哨兵默认值是允许的。
+# **Still 0.x because nobody has called 1.0.0 yet.** As of 0.11.0 all four
+# preconditions in the AGENTS.md §1② checklist are ticked, so releasing 1.0.0 is a
+# decision the owner makes, not a blocked one. Until it is made, compatibility is
+# not promised, and tightening a sentinel default in schemas the way 0.1.0 → 0.2.0
+# did stays allowed.
 #
-# ⚠️ 0.1.0 已经发到 PyPI（2026-08-19，OIDC）。PyPI 版本号不可重用，只能往前发。
-version = "0.10.0"
+# ⚠️ 0.1.0 is already on PyPI (2026-08-19, OIDC). PyPI version numbers cannot be
+# reused; the only direction is forward.
+version = "0.11.0"
 description = "Shared protocol contract for the OpenRoboto subnet on Bittensor (netuid 80): seed derivation, commitment codec, model hashing, status vocabulary and API schemas."
 readme = "README.md"
 license = "MIT"
@@ -20,22 +23,23 @@ license-files = ["LICENSE"]
 authors = [{ name = "OpenRoboto", email = "cameron@moonshotcommons.com" }]
 keywords = ["bittensor", "openroboto", "subnet", "protocol"]
 
-# ⚠️ 3.11，不是 uv init 默认的 3.12。矿工侧跑的就是 3.11
-# （openroboto-subnet 的 Dockerfile 和 SETUP_NATIVE.md 都写死 python3.11，
-#   openroboto-evaluation 是 >=3.11）。写 3.12 等于所有矿工装不上。
-# backend 自己是 3.12，向下兼容，没问题。
+# ⚠️ 3.11, not the 3.12 that `uv init` defaults to. The miner side runs 3.11
+# (openroboto-subnet's Dockerfile and SETUP_NATIVE.md both hardcode python3.11,
+#  openroboto-evaluation is >=3.11). Writing 3.12 means no miner can install this.
+# The backend is on 3.12, which is covered.
 requires-python = ">=3.11"
 
-# 保持零运行时依赖。这个包会装进矿工和评测机的环境，多一个依赖就多一处
-# 版本冲突的可能。真要引（比如 schemas.py 需要 pydantic），单独讨论。
+# Keep zero runtime dependencies. This package is installed into miner and evaluator
+# environments; every dependency is one more chance of a version conflict. If one is
+# really needed (schemas.py wanting pydantic, say), discuss it separately.
 dependencies = []
 
 classifiers = [
-    # ⚠️ 未裁决：这一行是按"1.0.0 = 契约已冻结"写的，而版本停在了 0.x 且
-    # README / AGENTS.md 明写「不承诺兼容」—— 矿工在 PyPI 页面上看到的就是这一行，
-    # 它和版本号今天讲的是两个故事。要么随 1.0.0 一起坐实，要么先降成
-    # "4 - Beta"。**不要顺手改**：这是矿工侧的产品判断，需要人来定。
-    "Development Status :: 5 - Production/Stable",
+    # This is the line miners read on the PyPI page, and it must tell the same story
+    # as the version number: while the package is 0.x, README and AGENTS.md say
+    # compatibility is not promised, so a "Production/Stable" badge would contradict
+    # them. It moves to "5 - Production/Stable" together with 1.0.0, not before.
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -46,28 +50,32 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/openroboto-ai/openroboto-protocol"
 Issues = "https://github.com/openroboto-ai/openroboto-protocol/issues"
-# 消费方钉的是精确版本，所以「这一版要不要我动手」是他们最先问的问题。
-# CHANGELOG 不进包（sdist/wheel 只带 README），PyPI 侧边栏这条链接是它唯一的入口。
+# Consumers pin exact versions, so "does this release require anything of me" is
+# their first question. The CHANGELOG does not ship inside the package (sdist and
+# wheel carry only the README), so this sidebar link on PyPI is its only entrance.
 Changelog = "https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md"
 
-# `schemas.py` 是唯一需要 pydantic 的模块，走 optional-dependency，主
-# `dependencies` 保持空。
+# `schemas.py` is the only module needing pydantic, so it goes behind an optional
+# dependency and the main `dependencies` stays empty.
 #
-# 为什么不进主 `dependencies`：矿工装这个包只为推导 seed 和解 commitment
-# （`seed.py` / `commitment.py` / `model_hash.py` 三个纯函数模块），
-# 不该被迫在 GPU 机器上编译一个 pydantic-core 轮子。
-# `__init__.py` 不 re-export 任何东西，所以 `import openroboto_protocol` 永远不会
-# 触发 `import pydantic` —— 零依赖承诺靠这一条成立，不是靠自觉
-# （`tests/test_schemas.py::test_package_import_does_not_require_pydantic` 钉住）。
+# Why not in the main `dependencies`: a miner installs this package only to derive a
+# seed and decode a commitment (`seed.py` / `commitment.py` / `model_hash.py`, three
+# pure-function modules), and should not be forced to build a pydantic-core wheel on
+# a GPU box. `__init__.py` re-exports nothing, so `import openroboto_protocol` never
+# triggers `import pydantic` — that is what makes the zero-dependency promise hold,
+# rather than good intentions
+# (`tests/test_schemas.py::test_miner_facing_imports_do_not_require_pydantic` pins it).
 #
-# 为什么 schemas 又值得用 pydantic（而不是继续用 stdlib dataclass）：
-# 后端是 FastAPI，dataclass 版本有一个**实测出来的天花板** —— 违例只能在
-# `__post_init__` 里拦，而那时框架已经把 JSON 值转过一轮了。用真的 pydantic 模型
-# 才能把 `StrictBool` / `StrictInt` 标上去，让「bool 冒充数字」这种事
-# （生产 `_validate_env_scores` 的第 1 道检查，历史代价是 `samples=-5` 直接夺擂）
-# 在**模型层**就不可表达，而不是靠每个调用方记得先手工校验一遍。
+# Why schemas is worth pydantic (instead of staying on stdlib dataclasses): the
+# backend is FastAPI, and the dataclass version has a **measured ceiling** — a
+# violation can only be caught in `__post_init__`, by which point the framework has
+# already coerced the JSON value once. Real pydantic models can carry `StrictBool` /
+# `StrictInt`, which makes "a bool posing as a number" unrepresentable at the **model
+# layer** (production's first check in `_validate_env_scores`; the historical cost
+# was `samples=-5` taking the crown) instead of relying on every caller remembering
+# to validate by hand first.
 #
-# 消费方：`openroboto-backend` 装 `openroboto-protocol[schemas]`。
+# Consumer: `openroboto-backend` installs `openroboto-protocol[schemas]`.
 [project.optional-dependencies]
 schemas = ["pydantic>=2.9,<3"]
 
@@ -81,8 +89,9 @@ dev = [
     "coverage>=7.4.3,<8.0.0",
     "mypy>=1.8.0,<3.0.0",
     "ruff>=0.2.2,<1.0.0",
-    # 本地要能跑 tests/test_schemas.py 和对 schemas.py 做 mypy，
-    # 所以 dev 环境把 optional-dependency 装上。这不改主 `dependencies`。
+    # The dev environment installs the optional dependency so that
+    # tests/test_schemas.py runs and mypy can see schemas.py locally. This does not
+    # change the main `dependencies`.
     "openroboto-protocol[schemas]",
 ]
 
@@ -106,6 +115,7 @@ strict = true
 python_version = "3.11"
 
 [tool.coverage.report]
-# 红线区。这个包里的每一行都决定历史评测能不能复现，不留缺口。
+# Red-line territory. Every line here decides whether a historical evaluation
+# reproduces; no gaps are left.
 fail_under = 100
 show_missing = true

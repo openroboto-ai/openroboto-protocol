@@ -21,6 +21,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
+#: The public surface of this module. What is not listed here is an
+#: implementation detail and may change in a patch release — without it there is
+#: no line between `patch` and `major` (AGENTS.md §1②).
+__all__ = [
+    "BURN_BLOCK_WINDOW",
+    "CHAMPION_MARGIN",
+    "DRAND_DEFAULT_CHAIN",
+    "LIBERO_TASK_SUITES",
+    "REQUIRED_ENVS",
+    "TOP_K",
+    "TOP_K_EMISSION",
+    "TOP_K_EMISSION_WEIGHTS",
+    "DrandBeacon",
+    "EmissionWeights",
+]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Emission weights
 # ─────────────────────────────────────────────────────────────────────────────
@@ -206,18 +222,19 @@ class DrandBeacon:
     """The three parameters of a drand chain, bound into one record — they can
     only ever be changed together.
 
-    `genesis_time` and `period_seconds` decide "which round a given point in
-    time corresponds to", and `chain_hash` decides "which chain that round is
-    fetched from". Cross any one of them and the round you compute points at a
-    random number on a different chain, the seed changes with it, and **once the
-    seed changes, historical evaluations are no longer reproducible** (spec §5).
+    `genesis_time` and `period_seconds` decide "which drand_round a given point
+    in time corresponds to", and `chain_hash` decides "which chain that
+    drand_round is fetched from". Cross any one of them and the drand_round
+    you compute points at a random number on a different chain, the seed changes
+    with it, and **once the seed changes, historical evaluations are no longer
+    reproducible** (spec §5).
     Writing the three as separate module constants is what gives you the chance
     to cross them.
     """
 
     #: drand chain identifier (also a segment of the API path).
     chain_hash: str
-    #: Unix timestamp (seconds) of round 1 of that chain.
+    #: Unix timestamp (seconds) of drand_round 1 of that chain.
     genesis_time: int
     #: Beacon period (seconds).
     period_seconds: int
@@ -229,7 +246,7 @@ class DrandBeacon:
 #: Checked against `https://api.drand.sh/<chain_hash>/info` on 2026-08-17:
 #: period=30, genesis_time=1595431050, and the hash matches.
 #:
-#: The round conversion formula (`max(1, (ts - genesis) // period + 1)`) and the
+#: The drand_round conversion formula (`max(1, (ts - genesis) // period + 1)`) and the
 #: network request that fetches the random number are both **not in this
 #: module** — the former belongs to `seed.py`, the latter is I/O and belongs to
 #: the backend.

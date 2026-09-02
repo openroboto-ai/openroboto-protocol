@@ -1,126 +1,146 @@
 name: Release
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 这个包发不出去的代价（写在这里，因为改这个文件的人需要知道自己在拆什么）
+# What it costs when this package cannot be published (written here because whoever
+# edits this file needs to know what they are taking apart)
 #
-# openroboto-protocol 是红线区的唯一真源：种子派生、模型指纹、状态词表、响应信封。
-# 它装不上，消费方就只能抄。今天 openroboto-backend 里就留着 3 处手抄副本 ——
-# app/domain/worker_reports.py · app/domain/reasons.py · app/api/envelope.py 的复制段 ——
-# 全靠防漂测试守着，而 backend CI 里那条 "Protocol version is pinned" 至今空转，
-# 因为依赖表里根本还没有这个包。
+# openroboto-protocol is the single source of truth for the red-line area: seed
+# derivation, model fingerprint, status vocabulary, response envelopes. If it cannot
+# be installed, consumers can only copy it. openroboto-backend used to carry three
+# hand-copied mirrors — app/domain/worker_reports.py · app/domain/reasons.py · the
+# copied block in app/api/envelope.py — guarded only by anti-drift tests, while the
+# backend's "Protocol version is pinned" check ran on nothing, because the package
+# was not in the dependency table at all.
 #
-# "手抄副本会漂"不是假设：protocol/types.py 漂过 105 行，payment.py 漂过 313 行，
-# 结果是矿工按 A 编码、后端按 B 解码，**两边都不报错**，直到有人去查为什么
-# 某次评测复现不出来。发布这一环就是为了把那条路径永久关掉。
+# That path was closed on 2026-08-19/20: all three mirrors became imports, both
+# consumer repos install from PyPI pinned to an exact version (backend 0.10.0 / CLI
+# 0.9.0), and both "No vendored protocol copy" and "Protocol version is pinned" now
+# run against something real. **This workflow is the precondition for that** — stop
+# it and consumers are back to copying.
+#
+# "Hand-copied files drift" is not hypothetical: protocol/types.py drifted 105 lines
+# and payment.py 313, so miners encoded by A while the backend decoded by B, **with
+# no error on either side**, until somebody went looking for why one evaluation
+# would not reproduce. Publishing is what closes that path for good.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# **正式发布**只在 v* tag 上：发布的输入必须是一个不可变的 git 引用，
-# 而且它就是消费方 `==` 钉住的那个数。
+# A **real release** only happens on a v* tag: the input to a release must be an
+# immutable git reference, and it is the same number consumers pin with `==`.
 #
-# `workflow_dispatch` 只走 TestPyPI 那条分支（见 `publish-testpypi` 的注释），
-# 手动触发**永远发不到正式 PyPI** —— 下面 `publish` job 的 `if` 钉死了这一点。
+# `workflow_dispatch` only takes the TestPyPI branch (see the comments on
+# `publish-testpypi`); a manual trigger can **never** reach real PyPI — the `if` on
+# the `publish` job below nails that down.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       confirm:
-        description: '发到 TestPyPI（不是正式 PyPI）。输入 testpypi 确认'
+        description: 'Publish to TestPyPI (not real PyPI). Type testpypi to confirm'
         required: true
         default: ''
         type: string
 
-# 默认收到最小；publish job 自己按需加 id-token。
+# Minimal by default; the publish job adds id-token for itself where needed.
 permissions:
   contents: read
 
-# cancel-in-progress: false —— 和 ci.yml 相反，是故意的。上传到 PyPI 的动作
-# 不可撤销也不可重放（同一个版本号只能上传一次），跑到一半被后来的 workflow
-# 掐掉，留下的是一个"发了一半"的版本，比慢一点糟糕得多。
+# cancel-in-progress: false — the opposite of ci.yml, deliberately. Uploading to
+# PyPI cannot be undone or replayed (a version number uploads exactly once), and
+# being cut off halfway by a later workflow leaves a half-published version, which is
+# much worse than being slow.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  # 与 ci.yml 保持同一个版本。升之前先确认 astral-sh/setup-uv 知道它的 checksum：
+  # Same version as ci.yml. Before bumping it, confirm astral-sh/setup-uv knows its
+  # checksum:
   # https://github.com/astral-sh/setup-uv/issues/851#issuecomment-4282017837
   UV_VERSION: "0.11.18"
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  # 发布前跑的门槛就是 PR 上跑的那一套，一行不差 —— 直接 uses ci.yml，
-  # 而不是在这里重写几步"发版检查"。重写出来的那套必然更弱（谁会在发版
-  # workflow 里把 3.11/3.12 矩阵和 100% 覆盖率再敲一遍），而且没人会记得
-  # 同时维护两份。
+  # The gates before a release are exactly the ones a PR runs, line for line — it
+  # `uses` ci.yml instead of restating a few "release checks" here. A restatement is
+  # necessarily the weaker one (who would retype the 3.11/3.12 matrix and the 100%
+  # coverage gate inside a release workflow), and nobody remembers to maintain two.
   #
-  # 它带来的具体保证（都在 ci.yml 里，红了就发不出去）：
-  #   · golden vectors —— 链上历史没被改写
-  #   · lint + mypy strict + pytest + coverage 100%（3.11 与 3.12 各一遍）
-  #   · tag 与 pyproject version 一致（build job 里的 "Tag matches package version"）
-  #   · twine check、wheel 里没有无条件依赖、装上后每个模块都 import 得动、
-  #     py.typed 在包里
+  # What that guarantees (all in ci.yml; red means it does not ship):
+  #   · golden vectors — on-chain history was not rewritten
+  #   · lint + mypy strict + pytest + coverage 100% (once on 3.11, once on 3.12)
+  #   · tag agrees with the pyproject version ("Tag matches package version" in the
+  #     build job)
+  #   · twine check, no unconditional dependencies in the wheel, every module imports
+  #     once installed, py.typed is in the package
   # ───────────────────────────────────────────────────────────────────────────
   gates:
     name: gates (the same ones every PR runs)
     uses: ./.github/workflows/ci.yml
 
   # ───────────────────────────────────────────────────────────────────────────
-  # PyPI Trusted Publishing（OIDC），不用 API token。
+  # PyPI Trusted Publishing (OIDC), no API token.
   #
-  # 理由和 backend 用 Workload Identity Federation 是同一个：长期 token 放在
-  # repo secrets 里，谁看过、什么时候泄的、泄了之后被用来发过什么，事后都查不出来；
-  # 而这个 token 的权限是"以 OpenRoboto 的名义往 PyPI 发任意版本" —— 拿到它的人
-  # 可以给全体矿工推一个改过种子派生的 1.0.1。OIDC 换来的 token 只对这一次
-  # workflow run 有效，且 PyPI 侧还要求它来自指定的 repo + workflow 文件 +
-  # environment，仓库里没有任何可偷的东西。
+  # Same reasoning as the backend using Workload Identity Federation: a long-lived
+  # token sitting in repo secrets cannot be audited afterwards — who saw it, when it
+  # leaked, what was published with it. And that token's power is "publish any
+  # version to PyPI as OpenRoboto", so whoever holds it can push every miner a 1.0.1
+  # with altered seed derivation. An OIDC token is valid for one workflow run, and
+  # PyPI additionally requires it to come from a named repo + workflow file +
+  # environment, so there is nothing in the repository worth stealing.
   #
-  # 关于 TestPyPI（2026-08-19 更新了这一段的结论）：
+  # On TestPyPI: the package itself does not need it. Metadata is judged by
+  # `twine check --strict`, and packaging integrity by installing the wheel,
+  # importing every module and checking py.typed.
   #
-  # 原来这里写的是"不发"，理由是 TestPyPI 只能多抓到"索引侧拒收"，而 metadata
-  # 由 `twine check --strict` 判过、包装完整性由"装 wheel 逐模块 import + 查
-  # py.typed"判过。那半段仍然成立 —— **包本身**确实不需要 TestPyPI 再验一遍。
+  # What the gates cannot verify is the **publishing channel itself**: whether the
+  # OIDC exchange succeeds, whether the environment name matches the record on
+  # pypi.org, whether `id-token: write` is enough. None of that runs before a real
+  # `uv publish`. Hence the `workflow_dispatch` TestPyPI branch, which runs the
+  # **same gates on the same artifact** and only changes the upload target.
   #
-  # 但它漏了一件 gates 验不到的东西：**发布通道本身**。OIDC 交换成不成、
-  # environment 名和 pypi.org 上那条记录对不对得上、`id-token: write` 够不够 ——
-  # 这些在真正 `uv publish` 之前一次都没跑过。所以补了一条 `workflow_dispatch`
-  # 的 TestPyPI 分支，它跑的是**同一个 gates、同一份产物**，只换上传目标。
+  # To keep the two from drifting, both jobs share `needs: [gates]` and the same
+  # artifact; the only difference is the environment name and the `--publish-url`
+  # line.
   #
-  # 原来那条"两份配置迟早只有一份是对的"的担心是真的，所以两个 job 共用
-  # `needs: [gates]` 和同一个 artifact，唯一的差别就是 environment 名和
-  # `--publish-url` 两行 —— 不存在"两套流程漂移"的空间。
+  # ⚠️ TestPyPI version numbers are **equally unreusable**. It is not a sandbox to
+  # publish into freely, only a place where a mistake does not reach real consumers.
   #
-  # ⚠️ TestPyPI 上的版本号**同样不可重用**。它不是可以随便乱发的沙盒，
-  # 只是发错了不影响真实消费方。
-  #
-  # 真正的安全网仍然是下面的 environment 人工审批 —— 版本号烧不起。
+  # The real safety net is still the human approval on the environment below — a
+  # version number cannot be spent twice.
   # ───────────────────────────────────────────────────────────────────────────
   publish:
     name: publish to PyPI
     needs: [gates]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 🔴 手动触发**永远**到不了正式 PyPI。没有这一行的话，
-    # `workflow_dispatch` 会同时点着两个 publish job，而那一个是不可撤销的。
+    # 🔴 A manual trigger can **never** reach real PyPI. Without this line a
+    # `workflow_dispatch` would light up both publish jobs, and that one cannot be
+    # undone.
     if: startsWith(github.ref, 'refs/tags/v')
 
-    # environment 有两个作用，缺一不可：
-    #   1. GitHub 上可以给它配 required reviewers —— 上传不可撤销、版本号不可重用，
-    #      在按下去之前必须有一个人类确认这确实是要发的那个 tag；
-    #   2. PyPI 的 trusted publisher 配置里填的就是这个名字，环境名对不上，
-    #      OIDC 交换直接被拒。改名字要同时改 pypi.org 上那条记录。
+    # The environment does two things, both required:
+    #   1. GitHub can require reviewers on it — the upload cannot be undone and the
+    #      version number cannot be reused, so a human must confirm this is the tag
+    #      to publish before it goes;
+    #   2. PyPI's trusted publisher configuration names this environment, and a
+    #      mismatch makes the OIDC exchange fail outright. Renaming it means
+    #      changing that record on pypi.org at the same time.
     environment:
       name: pypi
       url: https://pypi.org/p/openroboto-protocol
 
     permissions:
-      # OIDC 必需：没有它 uv 拿不到 id token，trusted publishing 无从谈起。
+      # Required for OIDC: without it uv cannot get an id token and trusted
+      # publishing is impossible.
       id-token: write
       contents: read
 
     steps:
-      # 不 checkout：发布用的是 gates 里构建并验证过的产物，不是重新构建的
-      # 另一份。少一次 checkout 也意味着这个拿着 id-token 的 job 里没有仓库代码
-      # 可执行 —— 唯一跑起来的东西是 uv publish。
+      # No checkout: what ships is the artifact built and verified by the gates, not
+      # a second build of it. Skipping the checkout also means this job, which holds
+      # the id token, has no repository code to execute — the only thing running is
+      # uv publish.
       - name: Download the artifact that passed the gates
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -132,11 +152,12 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
-      # ci.yml 已经比过一次 tag 与 pyproject 的 version。这里再比一次，比的是
-      # **产物文件名**，也就是真正要上传的那堆字节。上一次证明的是"源码里写着
-      # 1.0.0"，这一次证明的是"要传上去的包确实叫 1.0.0"。中间隔着一次
-      # artifact 上传下载，而消费方钉的是版本号：`openroboto-protocol==1.0.0`
-      # 装到别的东西，这个包唯一的存在理由当场作废。
+      # ci.yml already compared the tag against pyproject's version. This compares
+      # the **artifact filenames**, i.e. the bytes about to be uploaded. The first
+      # proved "the source says 1.0.0"; this proves "the package about to ship is
+      # really called 1.0.0". An artifact upload and download sit between the two,
+      # and consumers pin the version number: `openroboto-protocol==1.0.0` resolving
+      # to something else voids this package's only reason to exist.
       - name: Artifact version matches the tag
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -151,32 +172,35 @@ jobs:
           done
           echo "dist matches tag ${GITHUB_REF_NAME}"
 
-      # --trusted-publishing always：不是 automatic。automatic 在拿不到 OIDC
-      # token 时会**静默退回**去找 token/密码，于是权限配错的那次不会红，而是
-      # 变成一条看不懂的 401；always 直接失败在这一步，错误就在原地。
+      # --trusted-publishing always, not automatic. automatic **silently falls back**
+      # to looking for a token or password when it cannot get an OIDC token, so a
+      # misconfigured permission does not go red but turns into an unreadable 401.
+      # always fails right here, with the error where the cause is.
       - name: Publish
         run: uv publish --trusted-publishing always dist/*
 
   # ───────────────────────────────────────────────────────────────────────────
-  # TestPyPI —— 只手动触发，用来排练发布通道（不是排练包本身，那是 gates 的事）。
+  # TestPyPI — manual trigger only, to rehearse the publishing channel (not the
+  # package itself; that is what the gates are for).
   #
-  # 它和上面那个 job 的差别只有两行：environment 名、`--publish-url`。
-  # 其余全部共用：同一个 `needs: [gates]`、同一份 artifact、同样的
-  # `--trusted-publishing always`。**故意不给它自己的 gates** —— 两套门槛
-  # 迟早只有一套是对的。
+  # It differs from the job above by two lines: the environment name and
+  # `--publish-url`. Everything else is shared: the same `needs: [gates]`, the same
+  # artifact, the same `--trusted-publishing always`. **It deliberately has no gates
+  # of its own** — with two sets of gates, only one of them stays correct.
   #
-  # test.pypi.org 上要单独配一条 pending publisher，四个字段：
+  # test.pypi.org needs its own pending publisher, four fields:
   #   Owner=openroboto-ai  Repository=openroboto-protocol
   #   Workflow=release.yml  Environment=testpypi
-  # 前两个和正式那条一样，后两个里 environment **必须**不同，否则两条记录
-  # 在 PyPI 侧无法区分。
+  # The first two match the real record; the environment **must** differ, or PyPI
+  # cannot tell the two records apart.
   # ───────────────────────────────────────────────────────────────────────────
   publish-testpypi:
     name: publish to TestPyPI (rehearsal)
     needs: [gates]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 只认手动触发，且要在输入框里打字确认 —— 防的是"点开 Run workflow 顺手回车"。
+    # Manual trigger only, and it has to be typed into the confirmation box — this
+    # guards against opening "Run workflow" and hitting enter out of habit.
     if: >-
       github.event_name == 'workflow_dispatch'
       && github.event.inputs.confirm == 'testpypi'
@@ -201,9 +225,10 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
-      # 手动触发时没有 tag 可比，所以这里比的是**产物的形状**：恰好一个 sdist
-      # 加一个 wheel。多出第三个文件（比如上一次构建的残留）意味着要传上去的
-      # 不只是这次 gates 验过的那些字节。
+      # A manual trigger has no tag to compare against, so this checks the **shape of
+      # the artifact**: exactly one sdist and one wheel. A third file (a leftover from
+      # an earlier build, say) would mean uploading more than the bytes these gates
+      # verified.
       - name: Exactly one sdist and one wheel
         run: |
           ls -1 dist

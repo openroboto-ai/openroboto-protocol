@@ -187,3 +187,27 @@ def test_drand_beacon_is_frozen() -> None:
     change them beats changing them wrongly."""
     with pytest.raises(dataclasses.FrozenInstanceError):
         C.DRAND_DEFAULT_CHAIN.period_seconds = 3  # type: ignore[misc]
+
+
+def test_public_surface_is_pinned() -> None:
+    """`__all__` is the module's public surface, and SemVer promises about that
+    surface — with no list written down, `patch` (behaviour unchanged) and `major`
+    (breaking) have no boundary between them.
+
+    Mirrors `test_schemas.py::test_every_exported_model_is_pinned`: adding a
+    constant without deciding whether it is public goes red here rather than being
+    silently exported by whoever imports it.
+    """
+    assert set(C.__all__) == {
+        "BURN_BLOCK_WINDOW",
+        "CHAMPION_MARGIN",
+        "DRAND_DEFAULT_CHAIN",
+        "DrandBeacon",
+        "EmissionWeights",
+        "LIBERO_TASK_SUITES",
+        "REQUIRED_ENVS",
+        "TOP_K",
+        "TOP_K_EMISSION",
+        "TOP_K_EMISSION_WEIGHTS",
+    }
+    assert all(hasattr(C, name) for name in C.__all__)

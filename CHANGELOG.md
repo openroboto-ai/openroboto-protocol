@@ -20,62 +20,153 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.11.0 — 2026-09-02
+
+**Every identifier that called a competition a "round" is renamed.** Breaking for
+0.x consumers, and **nothing on chain or in a golden vector moved**: the payload
+key is still the byte `r`, `derive_seed` produces the same uint32 for the same
+three inputs, and all 122 golden vectors are green without one value being
+edited.
+
+### Miners already running: nothing to do
+
+The commitment JSON is byte-for-byte what it was. `r` is still `r`, `cid` is
+still `cid`, key order is unchanged, and a payload that used neither `cid` nor
+`m` encodes exactly as it did at 0.6.0. Only Python attribute names moved.
+
+### `openroboto-backend` / `openroboto-cli`: mechanical, and the compiler finds it
+
+Every rename below is an attribute or parameter, so an unported call site is an
+`AttributeError` or a `TypeError`, not a wrong value. There is no shape where the
+old name silently keeps working.
+
+| Was | Is | Where |
+|---|---|---|
+| `seed.derive_seed(block_hash, round_num, …)` | `seed.derive_seed(block_hash, competition_id, …)` | second parameter |
+| `seed.verify_seed(…, round_num, …)` | `seed.verify_seed(…, competition_id, …)` | third parameter |
+| `seed.SeedInputs.round_num` | `seed.SeedInputs.competition_id` | field |
+| `commitment.CommitmentPayload.round_num` | `commitment.CommitmentPayload.claimed_competition_seq` | field, wire key `r` unchanged |
+| `schemas.LeaderboardRow.round_num` | `schemas.LeaderboardRow.seq` | wire field |
+| `schemas.LeaderboardResponse.round_id` | `schemas.LeaderboardResponse.competition` | wire field |
+| `schemas.SubmissionDetail.round_id` | `schemas.SubmissionDetail.competition_id` | wire field |
+| `schemas.LivenessResponse.round` | `schemas.LivenessResponse.competition` | wire field |
+
+**Why `claimed_competition_seq` and not `claimed_competition_id`.** The payload
+already carries `competition_id` for `cid`, which is the `competitions.id`
+primary key. `r` is a different thing: self-reported by the miner, and an
+**ordinal within the simulation track** — the backend resolves it as
+`find_competition(track="sim", seq=r)`. Calling it an id would send the next
+reader looking it up as a primary key. `competition_id` stays with `cid` because
+that is what `cid` is.
+
+Three of the four wire renames are the backend catching up with itself, not new
+work: it renamed `LeaderboardRow.round_num` to `seq` on 2026-08-31, `/api/rank`'s
+`round_num` to `seq` on 2026-09-01, and `/healthz`'s `round` key to `competition`
+on 2026-09-01. `SubmissionDetail` is the one going the other way — it still emits
+`round_id` and follows this package.
+
+### Removed: the contract models for the retired `/rounds` endpoints
+
+`GET /api/v1/rounds` and `GET /api/v1/rounds/current` have been 410 tombstones
+since 2026-09-01 (an ordinal cannot locate a season — `(sim, 1)` and `(real, 1)`
+share it — so the whole family was replaced by `/api/v1/competitions`). Their
+models described nothing callable and are gone: `Champion`, `RoundStatus`,
+`ROUND_STATUSES`, `RoundSummaryEntry`, `RoundDetail`, `CurrentRoundResponse`,
+`RoundsSummary`, `RoundHistoryResponse`. Neither consumer repo imports any of
+them.
+
+### Deprecated, not removed: `worker_status_alias` / `WORKER_ACCEPTED_STATUSES`
+
+`GET /api/submission/{task_id}` emits the eight storable words verbatim and does
+no alias conversion (ruled 2026-09-02), which closes the TODO these carried. They
+stay because `openroboto-backend`'s worker-contract parity test imports both to
+assert the two vocabularies are disjoint; they go when that test does.
+
+### Also in this release
+
+- Every module now declares `__all__` — `constants`, `seed` and `model_hash` were
+  the three without one — each pinned by a `test_public_surface_is_pinned` case.
+  That completes the last of the four 1.0.0 preconditions, so **1.0.0 is now a
+  decision rather than a blocker**; it is the owner's to make and is not made.
+- The PyPI classifier drops to `Development Status :: 4 - Beta`, matching a
+  README that says compatibility is not promised while the version is 0.x.
+- Everything in this repository is written in English, including this file.
+
+### The evaluation worker and external validators
+
+`/api/rank` already sends `seq` and `/healthz` already sends `competition`; both
+changed on the backend before this release. Nothing else they read moves.
+
 ## 0.10.0 — 2026-09-01
 
-### 新增两个 stage：`queued` / `stalled`
+### Two new stages: `queued` / `stalled`
 
-worker 交还任务时说得出话了。此前 `stage` 的四个词全是「正在做什么」，
-没有一个能表达「我放手了」—— 于是评测重试路径（`_schedule_clean_retry`）
-清完缓存、本地塞回队尾，**一个字都不上报**。
+The worker can now say something when it lets go of a task. The four existing
+`stage` words all mean "currently doing X"; none of them could express "I have let
+go" — so the evaluation retry path (`_schedule_clean_retry`) cleared its cache, put
+the task back at the tail of its local queue, and **reported nothing at all**.
 
-2026-09-01 的代价：两个**已付费**的矿工任务在队列里显示 `prechecking` 挂了
-4 个多小时，而 worker 每 2 分钟崩一轮、白烧 GPU。从外面看，这和「正在正常评测」
-一模一样 —— `stage` 是唯一能说出真相的字段，而它没有那个词。
+What that cost on 2026-09-01: two **already paid** miner tasks sat in the queue
+showing `prechecking` for over four hours while the worker crashed and restarted
+every two minutes, burning GPU for nothing. From outside, that looked exactly like
+a healthy evaluation in progress — `stage` is the only field that could have told
+the truth, and it had no word for it.
 
-| | 含义 | 存储形态 |
+| | Meaning | Stored as |
 |---|---|---|
-| `queued` | 交还了，等人再领 | `queued`（**无前缀**）|
-| `stalled` | 不再重试，等人来看 | `stalled`（**无前缀**）|
+| `queued` | Handed back, waiting to be claimed again | `queued` (**no prefix**) |
+| `stalled` | Not retrying any more, waiting for a human | `stalled` (**no prefix**) |
 
-🔴 **两个都不是判决。** 它们说的是 worker 干了什么，不是模型怎么样。
-尤其 `stalled` **不许写成 `eval_failed`**：一台机器上失败 N 次是关于**那台机器**的
-证据，而基建崩了是我们的锅、矿工的费已经烧了 —— 判下去等于拿没人得出的结论花别人的钱。
+🔴 **Neither is a verdict.** They say what the worker did, not what the model is
+like. In particular `stalled` **must not be written as `eval_failed`**: failing N
+times on one machine is evidence about **that machine**, and broken infrastructure
+is our fault while the miner's fee is already burned — ruling against them means
+spending someone else's money on a conclusion nobody reached.
 
-⚠️ **这两个不带 `benchmark_` 前缀**，和上面四个不同。那个前缀标的是
-「评测正在处理这一行」，而这两个的意思正相反。给它们加前缀会让
-`stage.startswith("benchmark_")`（一个读起来很自然、迟早有人写的判断）
-表达出与字面相反的意思。
+⚠️ **Neither carries the `benchmark_` prefix**, unlike the four above. That prefix
+marks "the evaluation is working on this row", and these two mean the opposite.
+Prefixing them would make `stage.startswith("benchmark_")` — a check that reads
+naturally and that somebody will eventually write — say the opposite of what it
+means.
 
-⚠️ 顺序上它们排在四个进行态**之后**，但**不是第五、第六步** —— 是从任何一步
-都可能到达的出口。把 `STAGES` 读成「这六件事按顺序发生」是错的。
+⚠️ They are listed **after** the four in-progress words, but they are **not a fifth
+and sixth step** — they are exits reachable from any step. Reading `STAGES` as "these
+six things happen in order" is wrong.
 
-### `QueueStatusTask` 多两个字段：`stage_age_seconds` / `stage_stale`
+### `QueueStatusTask` gains two fields: `stage_age_seconds` / `stage_stale`
 
-**上面那两个词治的是「worker 说得出话」，这两个字段治的是「worker 什么都不说」。**
-后者才是 09-01 真正发生的事：进程在报完 `prechecking` 之后整个死掉，
-此后没有任何一次上报 —— 再多的词表也救不了一个不再说话的客户端，
-只有我们这边能凭「很久没心跳」把那一格降级。
+**The two words above fix "the worker can say something"; these two fields fix "the
+worker says nothing at all".** The latter is what actually happened on 09-01: the
+process died right after reporting `prechecking` and never reported again. No
+vocabulary can rescue a client that has stopped talking; only our side can downgrade
+that cell on the grounds that it has not been heard from in a long time.
 
-- `stage_age_seconds`：这个 `stage` 有多久没动过。**只有 `evaluating` 行有**，
-  其余是 `null`（终态行的 `stage` 停在那儿是对的，给它算一个越来越大的数字，
-  等于把「已经结束」显示成「越卡越久」）。
-- `stage_stale`：上面那个数越过后端阈值就是 `true`。
+- `stage_age_seconds`: how long this `stage` has gone without moving. **Present only
+  on `evaluating` rows**, `null` elsewhere (a terminal row's `stage` is meant to
+  stand still, and giving it an ever-growing number would display "finished" as
+  "stuck for longer and longer").
+- `stage_stale`: `true` once that number crosses the backend's threshold.
 
-🔴 **两个都不是判决**，同上面那条。陈旧的 `stage` 不等于任务失败 ——
-后端不据此改任何状态，它只是不再替一个自己无法核实的字段担保新鲜度。
+🔴 **Neither is a verdict**, same as above. A stale `stage` does not mean the task
+failed — the backend changes no status because of it. It has simply stopped
+vouching for the freshness of a field it cannot verify.
 
-⚠️ **阈值留在服务端，故意的。** 只发秒数、让每个客户端自己判，结果是两个页面
-在不同时刻说同一条任务卡住了，而要向矿工解释的是当时显示着的那一个。
+⚠️ **The threshold stays server-side, deliberately.** Sending only the seconds and
+letting every client decide ends with two pages calling the same task stuck at
+different moments, and the one you have to explain to a miner is whichever was on
+screen.
 
-**谁要动**：`openroboto-backend` 升到 0.10.0 之后这两个字段才存在，
-不升就是契约快照对不上（`test_task_key_set_matches_the_contract`）。
-前端拿布尔值置灰、拿秒数显示「N 分钟前更新」。
-**矿工和外部验证者：无事**，两个字段都是新增且可选。
+**Who has to act**: `openroboto-backend` only has these two fields after upgrading
+to 0.10.0; without the upgrade the contract snapshot disagrees
+(`test_task_key_set_matches_the_contract`). The frontend greys out on the boolean
+and renders "updated N minutes ago" from the seconds.
+**Miners and external validators: nothing to do** — both fields are new and
+optional.
 
 ## 0.9.0 — 2026-08-27
 
 **`round_num` is removed from six response models.** Breaking, on purpose, and the
-on-chain encoding does not move: `commitment.py` is untouched and all 149 golden
+on-chain encoding does not move: `commitment.py` is untouched and all 122 golden
 vectors are green.
 
 Gone from `QueueTask` · `ScoreSubmission` · `SubmissionRecord` · `QueueStatusTask` ·
@@ -126,9 +217,10 @@ behaves exactly as before.
 
 ### `openroboto-backend` / `openroboto-cli`: re-pin, then two follow-ups
 
-The backend already serves the field (migration `0014`); until the pin here moves
-to `0.8.0` the CLI's `Contract` base (`extra=ignore`) silently drops it on the way
-in, so **the CLI cannot see it no matter what the backend sends**. After re-pinning:
+The backend already serves the field (migration `0014`); until the pin there moved
+to `0.8.0` the CLI's `Contract` base (`extra=ignore`) silently dropped it on the way
+in, so **the CLI could not see it no matter what the backend sent**. The CLI is on
+`0.9.0` now, so the field arrives. After re-pinning:
 
 - `openroboto init` must copy `base_model_family` into `miner.yaml`'s
   `competition:` block (`commands/init.py`'s `SECTION_KEYS`). Its
@@ -319,9 +411,9 @@ payload written by software they run.
   emissions reach the chain (`{hotkey: share}` → `(uid, u16)`). It existed twice,
   in the backend's `chain_writer` and in the CLI's `chain/weights`, with nothing
   comparing them.
-- Consumers: both copies are meant to be deleted once this version is installed.
-  Each repository carries a test that turns red the moment the package gains the
-  module and states the three steps.
+- Consumers: both copies were deleted on 2026-08-21, once this version was
+  installed. Each repository carried a test that turned red the moment the package
+  gained the module and stated the three steps; those tests went with the copies.
 - Three details are load-bearing and must not be "cleaned up": strict `w > 0`,
   divide-before-multiply, and `int()` truncation rather than rounding. On-chain
   snapshot 122 is the evidence — `0.9 * 65535` is exactly 58981.5, `int` gives

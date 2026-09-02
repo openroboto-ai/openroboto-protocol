@@ -82,7 +82,7 @@ def normalize_weights(
       statement to the chain.
     - `share = w / total` first, then `share * U16_MAX` -- **not**
       `w * U16_MAX / total`. Those are not equal in floating point.
-    - `int(...)` truncates, it does not round. The evidence is on chain: in
+    - `int(...)` truncates rather than rounding. The evidence is on chain: in
       snapshot 122 the burn address holds 0.9 of the total, and
       `0.9 * 65535 == 58981.5` exactly. `int` gives 58981, `round` gives 58982 --
       **switching to `round()` rewrites a value that is already on chain.**
@@ -108,7 +108,7 @@ def normalize_weights(
         The uid list, the u16 list, and the per-entry log lines. Empty lists
         when nothing has a positive weight -- the caller must not send an
         extrinsic in that case, and must treat it as an event worth reporting:
-        it means no miner is being paid this round.
+        it means no miner is being paid this time.
     """
     positive: dict[int, float] = {}
     detail: list[str] = []

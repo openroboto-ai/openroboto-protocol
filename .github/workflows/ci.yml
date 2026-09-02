@@ -1,14 +1,17 @@
 name: CI
 
-# 单分支：main 是唯一长期分支，功能走 PR。直推 main 也跑一遍 ——
-# 只在 PR 上触发的话，直推的改动一次检查都不会过。
+# Single branch: main is the only long-lived branch and features go through PRs.
+# Direct pushes to main run this too — triggering on PRs alone would let a direct
+# push through without a single check.
 #
-# tag **不在**这里触发，改由 release.yml 用 workflow_call 调进来 —— 发版必须
-# 等这套门槛全绿才允许 publish，而 `needs:` 跨不了 workflow。两边都挂 tag 触发
-# 的话同一个 tag 会把整套测试跑两遍，且其中一遍的结果没人看。
+# Tags do **not** trigger here; release.yml pulls this in with workflow_call,
+# because publishing must wait for these gates and `needs:` cannot cross workflows.
+# Triggering on tags in both places would run the whole suite twice for one tag,
+# and nobody would look at one of the two results.
 #
-# workflow_call 意味着这个文件是**唯一**一份门槛定义。release.yml 里不许再抄
-# 一套"发版专用"的检查：抄出来的那套只会比这份弱，而且没人会同时维护两份。
+# workflow_call means this file is the **only** definition of the gates. No
+# "release-specific" checklist may be copied into release.yml: the copy would only
+# ever be the weaker one, and nobody maintains two.
 on:
   pull_request:
     branches: [main]
@@ -24,23 +27,24 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # 只有一处版本号，三个 job 共用 —— 分开写迟早漏掉一个，
-  # 于是同一次 CI 里两个 job 用不同的 uv 解析出不同的依赖树。
-  # 升版本前先确认 astral-sh/setup-uv 知道它的 checksum：
+  # One version number shared by all three jobs — written separately, one of them
+  # eventually gets missed and two jobs in the same run resolve different dependency
+  # trees. Before bumping it, confirm astral-sh/setup-uv knows its checksum:
   # https://github.com/astral-sh/setup-uv/issues/851#issuecomment-4282017837
   UV_VERSION: "0.11.18"
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  # 黄金向量单独成 job，名字就是它的语义。
+  # Golden vectors get their own job, and the job name is its meaning.
   #
-  # 别的 job 红了是"代码写错了"，这个 job 红了是**有人改了已经发生在链上的历史** ——
-  # 那段历史决定了谁拿到排放。两者的处理方式完全不同（一个是修代码，一个是停下来
-  # 说明为什么要改写过去），所以在 PR 的检查列表里必须一眼分得开，不能混在
-  # "tests" 里当一条普通用例。
+  # A red anywhere else means "the code is wrong". A red here means **somebody
+  # changed history that already happened on chain** — history that decided who got
+  # emissions. The two are handled completely differently (fix the code vs. stop and
+  # explain why the past needs rewriting), so they must be told apart at a glance in
+  # the PR check list and not buried inside "tests" as one more case.
   #
-  # 跑在 .python-version（3.11）上，因为矿工侧就是 3.11 —— 复现历史用的解释器
-  # 应当是产生历史的那一个。
+  # Runs on .python-version (3.11) because that is what the miner side runs — the
+  # interpreter that reproduces history should be the one that produced it.
   # ───────────────────────────────────────────────────────────────────────────
   golden-vectors:
     name: golden vectors (RED = on-chain history was rewritten)
@@ -57,35 +61,40 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
 
-      # --locked：依赖变了却没更新 uv.lock 时当场失败，而不是让 CI 自己
-      # 悄悄重新解析一遍 —— 那样 CI 装的和发版机器装的就不是同一套。
+      # --locked: fail on the spot when dependencies changed without uv.lock being
+      # updated, instead of letting CI quietly re-resolve — that would install
+      # something other than what the release machine installs.
       - run: uv sync --locked
 
-      # 用 glob 而不是列文件名：新增一个 test_*golden_vectors.py 会自动被带上。
-      # 而如果有人把文件改名跑出这个约定，glob 匹配不到、pytest 直接报用法错误 ——
-      # 是显式失败，不是静默跳过。同理 GOLDEN_SEEDS 被清空的话 pytest 会以
-      # "no tests collected"(exit 5) 退出，也红。这个 job 没有"空转变绿"的路径。
+      # A glob rather than a list of filenames: a new test_*golden_vectors.py is
+      # picked up automatically. And if somebody renames a file out of that
+      # convention the glob matches nothing and pytest reports a usage error — an
+      # explicit failure, not a silent skip. Likewise, emptying GOLDEN_SEEDS makes
+      # pytest exit 5 ("no tests collected"), which is also red. This job has no path
+      # to going green on nothing.
       - name: Golden vectors
         run: uv run pytest tests/test_*golden_vectors.py -q
 
   # ───────────────────────────────────────────────────────────────────────────
-  # 3.11 和 3.12 都必须过：矿工侧与评测机是 3.11（openroboto-subnet 的 Dockerfile
-  # 写死 python3.11），backend 是 3.12。这个包同时装进两边，只在一边验证等于
-  # 把兼容性问题留给矿工在装包时发现。
+  # Both 3.11 and 3.12 must pass: miners and the evaluation machine are on 3.11
+  # (openroboto-subnet's Dockerfile hardcodes python3.11), the backend is on 3.12.
+  # This package is installed into both, and verifying only one side leaves the
+  # compatibility problem for a miner to discover at install time.
   # ───────────────────────────────────────────────────────────────────────────
   ci:
     name: lint + tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
-      # 一边挂不掩盖另一边的结果 —— 需要知道是两边都坏了还是只坏一边。
+      # One side failing must not hide the other's result — we need to know whether
+      # both are broken or only one.
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     env:
-      # UV_PYTHON 优先级高于 .python-version，让 uv 自己管解释器，
-      # 不用 setup-python —— 否则 setup-python 装 3.12、uv 读 .python-version
-      # 又去下 3.11，矩阵形同虚设。
+      # UV_PYTHON outranks .python-version, so uv manages the interpreter itself and
+      # setup-python is not used — otherwise setup-python installs 3.12, uv reads
+      # .python-version and downloads 3.11, and the matrix means nothing.
       UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,38 +107,42 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
 
-      # --locked：依赖变了却没更新 uv.lock 时当场失败，而不是让 CI 自己
-      # 悄悄重新解析一遍 —— 那样 CI 装的和发版机器装的就不是同一套。
+      # --locked: fail on the spot when dependencies changed without uv.lock being
+      # updated, instead of letting CI quietly re-resolve — that would install
+      # something other than what the release machine installs.
       - run: uv sync --locked
 
-      # 调脚本而不是在这里展开三条命令：本地 `bash scripts/lint.sh` 和 CI 跑的
-      # 必须是同一份，否则迟早出现"本地全绿、CI 红"，或者更糟 —— CI 那份悄悄比
-      # 本地弱。脚本里写了每个工具各管哪一段。
+      # Call the script instead of spelling out three commands here: local
+      # `bash scripts/lint.sh` and what CI runs must be the same file, or sooner or
+      # later you get "green locally, red in CI" — or worse, a CI copy that is
+      # quietly weaker. The script says which tool covers which part.
       - name: Lint
         run: bash scripts/lint.sh
 
-      # --source=src 是必须的：不写的话 coverage 会把 pytest 自身也算进来，
-      # 分母被稀释，100% 门槛就失去意义。
+      # --source=src is not optional: without it coverage also measures pytest
+      # itself, the denominator inflates and the 100% gate stops meaning anything.
       - name: Test
         run: uv run coverage run --source=src -m pytest -q
 
-      # 100% 不是 90%。这个包一共几百行，每一行都决定历史评测能不能复现、
-      # 哪笔 burn 算数、谁拿到排放 —— 没有"这段不重要"的行。
-      # pyproject 里也写了 fail_under=100，这里再显式写一遍，是防止有人
-      # 悄悄调低配置后 CI 依然绿。
+      # 100%, not 90%. The package is a few hundred lines and every one of them
+      # decides whether a historical evaluation reproduces, whether a payment counts,
+      # or who gets emissions — there is no "this part does not matter" line.
+      # pyproject also sets fail_under=100; stating it again here keeps CI from
+      # staying green after somebody quietly lowers the config.
       - name: Coverage gate
         run: uv run coverage report --fail-under=100
 
   # ───────────────────────────────────────────────────────────────────────────
-  # 发布前的最后一道：能不能打出包、打出来的包装上之后还是不是完整的。
-  # 每次 PR 都跑，不是只在 tag 上跑 —— 打包坏了要在合并前知道，不是在
-  # 发 1.0.0 的那一刻知道。
+  # The last gate before publishing: can a package be built, and is it still whole
+  # once installed. It runs on every PR, not only on tags — broken packaging should
+  # be known before the merge, not at the moment 1.0.0 goes out.
   #
-  # 这里依然**没有** uv publish：publish 需要 `id-token: write` 和一个带人工
-  # 审批的 environment，而这个 job 每个 PR 都跑。把发布放进来等于每个 PR 都要
-  # 有人去点审批，且 PR 分支上的代码拿到了 OIDC 权限。发布在 release.yml，
-  # 它 `uses:` 这个文件当门槛，再下载这个 job 传上去的 dist —— **发出去的就是
-  # 这里验过的那一份产物**，不是重新构建的另一份。
+  # There is still **no** uv publish here: publishing needs `id-token: write` and an
+  # environment with human approval, and this job runs on every PR. Putting the
+  # release here would mean somebody approving every PR, with PR-branch code holding
+  # OIDC permissions. Publishing lives in release.yml, which `uses:` this file as its
+  # gates and then downloads the dist this job uploaded — **what ships is the exact
+  # artifact verified here**, not a second build of it.
   # ───────────────────────────────────────────────────────────────────────────
   build:
     name: build (packaging gate; publish lives in release.yml)
@@ -147,9 +160,10 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
 
-      # 版本号就是契约版本。tag 与 pyproject 对不上意味着消费方钉死的
-      # `openroboto-protocol==1.0.0` 装到的是别的东西 —— 这个包唯一的存在理由
-      # （两边能被证明装的是同一份）当场作废。
+      # The version number is the contract version. A tag disagreeing with pyproject
+      # means a consumer pinning `openroboto-protocol==1.0.0` installs something
+      # else — which voids this package's only reason to exist (that both sides can
+      # be proven to have installed the same thing).
       - name: Tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -163,17 +177,21 @@ jobs:
 
       - run: uv build
 
-      # PyPI 会在**上传时**拒收 metadata 有问题的包（最常见的是 README 渲染不了）。
-      # 那一刻 tag 已经推出去了，只能改代码重打一个版本号 —— 而版本号就是契约版本，
-      # 为了排版问题烧掉一个不是小事。twine check 把这条判断提前到 PR。
-      # uvx：一次性工具，不进 dev 依赖组，矿工和 CI 的环境都不用为它付代价。
+      # PyPI rejects bad metadata **at upload time** (most often a README that will
+      # not render). By then the tag is pushed, and the only way out is a new version
+      # number — and the version number is the contract version, so burning one over
+      # a formatting problem is not a small thing. twine check moves that judgement
+      # forward to the PR.
+      # uvx: a one-shot tool, kept out of the dev group so neither miner nor CI
+      # environments pay for it.
       - name: Metadata is uploadable
         run: uvx twine check --strict dist/*
 
-      # 零依赖承诺写在 wheel 的 METADATA 里，就在这里查，不靠自觉。
-      # 带 `extra ==` 标记的依赖没问题 —— 那是消费方自己选装的（后端装
-      # `openroboto-protocol[schemas]` 才拿 pydantic）。**没有标记**的一条
-      # 就意味着每台矿工 GPU 机器都被迫装它，那是矿工替我们的方便付钱。
+      # The zero-dependency promise is written in the wheel's METADATA, so it is
+      # checked there rather than trusted. A dependency carrying an `extra ==` marker
+      # is fine — the consumer opted into it (only `openroboto-protocol[schemas]`
+      # pulls pydantic). One **without** a marker is forced onto every miner GPU box,
+      # which is miners paying for our convenience.
       - name: Wheel declares no unconditional dependencies
         run: |
           meta="$(unzip -p dist/*.whl '*.dist-info/METADATA')"
@@ -186,21 +204,24 @@ jobs:
           fi
           printf '%s\n' "$meta" | grep -E '^(Requires-Dist|Provides-Extra):' || echo "no dependencies at all"
 
-      # 装上打出来的 wheel 再验一遍。两件事只有装完才看得见：
-      #   1. py.typed 有没有进包 —— 少了它，消费方的 mypy 会把这个包整个当 Any，
-      #      不报错、静默失效，而"消费方 mypy 认得类型"正是发包的主要收益之一；
-      #   2. 有没有模块漏进 wheel —— 遍历包内所有模块逐个 import，
-      #      新加模块自动被覆盖，不用回来改这段。
-      # extras 从 METADATA 里读，不写死名字：装全 extras 才能 import 到需要
-      # 可选依赖的模块（今天是 schemas 要 pydantic），而 extras 改名或增删时
-      # 这一步不用跟着改。
+      # Install the built wheel and check again. Two things are only visible after
+      # installing:
+      #   1. whether py.typed made it into the package — without it a consumer's mypy
+      #      treats this package as Any, silently, and "consumers' mypy sees the real
+      #      types" is one of the main reasons to publish it;
+      #   2. whether a module missed the wheel — every module in the package is
+      #      imported in turn, so a new module is covered without editing this step.
+      # extras are read from METADATA rather than hardcoded: installing all extras is
+      # what makes the modules needing an optional dependency importable (today,
+      # schemas needs pydantic), and renaming or adding an extra does not touch this.
       - name: Smoke test the built wheel
         run: |
           wheel="$(ls dist/*.whl)"
           extras="$(unzip -p "$wheel" '*.dist-info/METADATA' \
             | sed -n 's/^Provides-Extra: //p' | paste -sd, -)"
-          # 写成 if 而不是 `[ -n .. ] && ..`：GitHub 的默认 shell 是 `bash -e`，
-          # extras 为空时那种写法整条语句返回 1，直接把这一步判失败。
+          # An if, not `[ -n .. ] && ..`: GitHub's default shell is `bash -e`, and
+          # with empty extras that form returns 1 for the whole statement, failing
+          # this step outright.
           if [ -n "$extras" ]; then
             wheel="${wheel}[${extras}]"
           fi
@@ -230,6 +251,6 @@ jobs:
         with:
           name: dist
           path: dist
-          # 默认 90 天。GitHub Free 的 Actions 存储只有 500 MB，
-          # 长保留期的产物会悄悄把额度吃光然后开始计费。
+          # The default is 90 days. GitHub Free gives Actions 500 MB of storage, and
+          # long-retained artifacts quietly eat the quota and then start billing.
           retention-days: 7

@@ -311,8 +311,8 @@ absorbed is before the miner pays — see
 # ── LingBot-VLA 2.0 ────────────────────────────────────────────────────────
 #
 # A second base model, not a replacement. Everything below is additive: the
-# openpi rules above are what miners have been submitting against since round 1
-# and they are not touched.
+# openpi rules above are what miners have been submitting against since
+# `(sim, 1)` and they are not touched.
 #
 # Every constant here was read off the vendor's published checkpoints and
 # training repo, not inferred. **Two** checkpoints are referenced, because they
@@ -718,7 +718,7 @@ def _scan_files(
     :func:`check_checkpoint_layout`, not a refactor of it. That function decides
     whether TAO a miner has already burned counts, it has been published since
     0.6.0, and both consumers call it; the cheapest way to prove it still judges
-    round 1 exactly as it did is for its diff to be empty. The duplication is
+    `(sim, 1)` exactly as it did is for its diff to be empty. The duplication is
     bought back with
     ``tests/test_model_format.py::test_both_checkers_scan_shared_rules_alike``,
     which runs both functions over the real repo trees and asserts the shared

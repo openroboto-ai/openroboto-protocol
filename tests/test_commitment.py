@@ -55,7 +55,7 @@ GV1_PAYLOAD = CommitmentPayload(
     hotkey_ss58="5D33cWAUBDJLKEP6c2hCYxumbGKzV92qrbDuscmGbsBoEmiQ",
     block_hash="94f06bc414624cf0935730f43a5d761df16b5e51d9327388287b280701cd0a22",
     hf_commit="09ecbfb798b7ab080fd5f54b60b3830d7e1a52e0",
-    round_num=1,
+    claimed_competition_seq=1,
     hf_repo_id="kyleab/pi05-scmGbsBoEmiQ",
     # The chain stores the bare hash without 0x; decoding adds the 0x back — the
     # deduplication key depends on this form.
@@ -173,7 +173,7 @@ def test_encode_strips_0x_from_both_hashes() -> None:
             hotkey_ss58="5Dxxx",
             block_hash="0xaabb",
             hf_commit="c" * 40,
-            round_num=2,
+            claimed_competition_seq=2,
             hf_repo_id="u/r",
             burn_tx_hash="0xccdd",
             burn_block=7,
@@ -258,7 +258,7 @@ def test_decode_falls_back_to_a_bare_payload_dict() -> None:
     """The caller hands in an already decoded dict directly (the fallback path of
     old code)."""
     result = decode({"block": 42, "r": 3, "i": "u/r"})
-    assert result.payload.round_num == 3
+    assert result.payload.claimed_competition_seq == 3
     assert result.payload.hf_repo_id == "u/r"
     assert result.commit_block == 42
     assert result.data_variant == ""
@@ -381,17 +381,17 @@ def test_decode_defaults_every_missing_key() -> None:
 
 def test_decode_coerces_wrong_typed_fields_instead_of_crashing() -> None:
     """A miner writing the wrong type must not blow up a whole chain-scanning
-    round; a bad field degrades to its default value and the backend's own
+    pass; a bad field degrades to its default value and the backend's own
     validations will reject it."""
     payload = decode('{"s":5,"i":null,"r":"7","bb":"x","c":true}').payload
     assert payload.hotkey_ss58 == ""
     assert payload.hf_repo_id == ""
-    assert payload.round_num == 7  # a numeric string is accepted
+    assert payload.claimed_competition_seq == 7  # a numeric string is accepted
     assert payload.burn_block == 0  # non-numeric falls back to the default
     assert payload.hf_commit == ""  # a bool is not a string
     # in Python a bool is a subclass of int, so it must not be casually taken
     # as 1/0
-    assert decode('{"r":true,"i":"u/r"}').payload.round_num == 0
+    assert decode('{"r":true,"i":"u/r"}').payload.claimed_competition_seq == 0
 
 
 def test_decode_does_not_double_prefix_an_already_prefixed_burn_hash() -> None:
@@ -406,7 +406,7 @@ def test_decode_leaves_block_hash_unprefixed() -> None:
     """⚠️ Red line: `h` is a value the miner reports itself — **do not add 0x**
     and do not process it in any way.
 
-    `derive_seed()` takes the sha256 of `f"{block_hash}:{round}:{drand}"`, so two
+    `derive_seed()` takes the sha256 of `f"{block_hash}:{cid}:{drand}"`, so two
     extra characters mean a different seed and a different set of tasks. The
     caller must overwrite it with the real on-chain hash; "helpfully adding a 0x"
     for it here amounts to silently changing the seed.
@@ -419,7 +419,7 @@ def test_payload_is_frozen() -> None:
     """The seven fields must share one source. If it were mutable, "this
     block_hash paired with that burn_tx" could happen."""
     with pytest.raises(AttributeError):
-        decode(GV1_BYTES).payload.round_num = 99  # type: ignore[misc]
+        decode(GV1_BYTES).payload.claimed_competition_seq = 99  # type: ignore[misc]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -453,7 +453,7 @@ GV6_PAYLOAD = CommitmentPayload(
     hotkey_ss58="5" + "D" * 47,
     block_hash="a" * 64,
     hf_commit="b" * 40,
-    round_num=9,
+    claimed_competition_seq=9,
     hf_repo_id="n" * 96 + "/" + "m" * 47,  # 144 characters, the limit
     # Normalized form, with the `0x` decode() adds back; the chain stores the
     # bare 64 characters.
@@ -482,28 +482,32 @@ def test_sim_payload_without_cid_is_byte_identical_to_0_6_0() -> None:
 def test_gv1_decodes_with_competition_id_none() -> None:
     """An old miner's commitment has no `cid`, and that must be silent: `None`
     means "the key was absent", and the caller reads the submission as
-    `(sim, seq=round_num)`. Raising here would reject every miner running today.
+    `(sim, seq=claimed_competition_seq)`. Raising here would reject every miner
+    running today.
     """
     payload = decode(GV1_BYTES).payload
     assert payload.competition_id is None
     assert payload.model_hash is None
 
 
-def test_gv1_round_num_survives() -> None:
+def test_gv1_claimed_competition_seq_survives() -> None:
     """`r` may not be tidied away. For a payload without `cid` it is the only
     thing that locates the season, and the backend's backfill keys off exactly
-    this (`competitions.track='sim' AND seq=round_num`)."""
-    assert decode(GV1_BYTES).payload.round_num == 1
-    assert "round_num" in {f.name for f in dataclasses.fields(CommitmentPayload)}
+    this (`competitions.track='sim' AND seq=claimed_competition_seq`)."""
+    assert decode(GV1_BYTES).payload.claimed_competition_seq == 1
+    assert "claimed_competition_seq" in {
+        f.name for f in dataclasses.fields(CommitmentPayload)
+    }
 
 
-def test_gv5_sim_with_cid_round_trips() -> None:
+def test_gv5_sim_with_cid_survives_a_full_encode_decode() -> None:
     """A simulation payload that names its season: `cid` comes back as it went
     in, and the package does not infer a track from it."""
     blob = encode(GV5_PAYLOAD)
     assert decode(blob).payload == GV5_PAYLOAD
     assert decode(blob).payload.competition_id == 2
-    assert decode(blob).payload.round_num == 1  # `r` still there next to `cid`
+    # `r` is still there next to `cid`
+    assert decode(blob).payload.claimed_competition_seq == 1
     assert json.loads(blob).keys() == {"s", "h", "c", "r", "i", "b", "bb", "cid"}
 
 
@@ -641,7 +645,8 @@ def test_check_payload_rejects_a_malformed_model_hash(bad: str) -> None:
 
 
 def test_check_payload_demands_a_competition_id_on_the_real_track() -> None:
-    """Without `cid` a real-track submission is read as `(sim, seq=round_num)` —
+    """Without `cid` a real-track submission is read as
+    `(sim, seq=claimed_competition_seq)` —
     it would land on the simulation leaderboard with the entry fee spent."""
     with pytest.raises(CommitmentFieldError) as exc:
         check_payload(dataclasses.replace(GV6_PAYLOAD, competition_id=None), Track.REAL)

@@ -9,16 +9,19 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.10.0"
+uv add "openroboto-protocol==0.11.0"
 # or
-pip install "openroboto-protocol==0.10.0"
+pip install "openroboto-protocol==0.11.0"
 ```
 
 ```python
 from openroboto_protocol.seed import derive_seed, verify_seed
 
-seed = derive_seed(block_hash, round_num, drand_random)
+seed = derive_seed(block_hash, competition_id, drand_random)
 ```
+
+The second argument is `competitions.id`. 0.11.0 renamed that parameter without
+moving a byte — see the CHANGELOG — so every historical seed still reproduces.
 
 Python **3.11+** (miners and the evaluator run 3.11, the backend runs 3.12; CI
 tests both). Ships `py.typed`, so your `mypy` sees the real types.
@@ -29,7 +32,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.10.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.11.0"   # backend only
 ```
 
 ## Why this package exists
@@ -47,7 +50,7 @@ copy-paste away from happening.
 
 | Module | Contract | Who needs both sides to agree |
 | --- | --- | --- |
-| `seed.py` | Seed derivation — block hash + round + drand randomness → uint32 | Backend derives it, miners verify it |
+| `seed.py` | Seed derivation — block hash + competition id + drand randomness → uint32 | Backend derives it, miners verify it |
 | `commitment.py` | Commitment payload encode / decode | Miners write it on chain, backend reads it |
 | `model_hash.py` | Model fingerprinting | Both compute it; a mismatch rejects a submission |
 | `model_format.py` | What a submittable checkpoint must contain | Miners export to it, the evaluator rejects against it |
@@ -81,19 +84,17 @@ The version number *is* the contract version.
 > `schemas.py` and the vocabularies in `status.py` may still change without a
 > major bump.
 >
-> This is deliberate, and it ends on a specific event, not on a date:
-> **`openroboto-backend` and `openroboto-cli` have not picked their launch
-> versions yet.** Both install and import this package today, but neither has
-> locked the version it goes live with, and the backend still carries three
-> hand-copied mirrors
+> The reason it stayed 0.x was that a contract nobody had really consumed would
+> only freeze the shape it happened to have grown into. That reason is gone:
+> `openroboto-backend` and `openroboto-cli` both install and import this package
+> and both pin an exact version, the backend's three hand-copied mirrors
 > (`app/domain/worker_reports.py`, `app/domain/reasons.py`, the copied block in
-> `app/api/envelope.py`) — the very drift this package exists to end. Freezing a
-> contract before that would freeze whatever shape it happens to have, not the
-> shape integration proves it needs.
+> `app/api/envelope.py`) were deleted on 2026-08-19/20, `normalize_weights` moved
+> in, and every module declares its public surface.
 >
-> **`1.0.0` ships when backend and CLI lock their launch versions against it.**
-> From that release on, the table below is binding and going back to `0.x`
-> is not an option — `tests/test_version.py` enforces exactly that.
+> **`1.0.0` is a decision now, not a blocker** — the owner's, and it is not made
+> yet. From that release on the table below is binding and going back to `0.x`
+> is not an option; `tests/test_version.py` enforces exactly that.
 
 | Bump | Meaning |
 | --- | --- |
@@ -101,7 +102,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.10.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.11.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
@@ -140,36 +141,22 @@ The `*protocol/*.py` pathspec catches nested copies too (`backend/protocol/statu
 in the old prototype). It deliberately matches only `.py` files, so a `docs/protocol/`
 directory of prose does not trip it.
 
-That snippet is what `openroboto-backend` runs, where it passes. `openroboto-cli`
-cannot run it yet: its `protocol/{__init__,seed,types}.py` are still on disk, and
-that repository's own rule is that files inherited from `openroboto-subnet` are never
-deleted, only stopped being used (`openroboto-cli/SCOPE.md`). So the cli variant
-compares the file list against an explicit grandfathered set instead of requiring it
-to be empty — see the workflow. Two properties matter: a **fourth** copy anywhere in
-the repository is still red, and the day those three files are archived the list stops
-matching and the exemption has to be deleted along with them. It is not
-`continue-on-error` and it is not scoped to `src/` — a check that cannot fail on the
-files it was written for is decoration.
+Both consumers run exactly that snippet, and it passes in both, because in both the
+file list is empty. `openroboto-cli` used to need a variant: its inherited
+`protocol/{__init__,seed,types}.py` were still on disk, and that repository's rule
+was that files inherited from `openroboto-subnet` are never deleted, only stopped
+being used. So its check compared the file list against an explicit grandfathered
+set, and stated the exit condition as "the day those files disappear". **2026-08-19
+was that day** — the old structure was deleted wholesale, the exemption list went
+with it, and `openroboto-cli/.github/workflows/protocol-guards.yml` is back to
+requiring the list to be empty. `openroboto-cli/tests/test_vendored_protocol.py`
+holds the same shape locally, so it goes red before a commit rather than after.
 
-The imports were the actual leak, and they are gone: nothing in `openroboto-cli`
-imports `protocol.seed` any more (the two docs that told miners to do so now say
-`openroboto_protocol.seed`), and `protocol/seed.py` was turned into a re-export shim,
-so even a stale import gets this package's code rather than a copy that can drift.
-
-Two files could not follow. `protocol/types.py` cannot become a shim because it has
-**already** drifted — its `TOP_K_EMISSION_WEIGHTS` is the relative `[0.70, 0.20, 0.10]`
-against this package's live absolute `(0.07, 0.02, 0.01)`, and its status vocabulary
-shares no word with `status.py`. Re-exporting would silently swap those values, which
-is changing behaviour, not moving code. It is deprecated whole instead. Two legacy
-files still read `PI05_BASE_CHECKPOINT` and `VLAEpisode` from it, and neither symbol
-exists here yet — whether they belong here at all is an open question.
-
-`protocol/__init__.py` has no imports at all, deliberately. A package-level re-export
-there would make `openroboto_protocol` a hard requirement of `from protocol.types
-import …` (Python runs the parent `__init__` first), and the miners still on the old
-`requirements.txt` training flow do not have this package installed. That would have
-broken their training at the first line, silently, for people who are not on the team.
-`openroboto-cli/tests/test_vendored_protocol.py` holds that shape in place.
+That is the point of writing an exemption list with an exit condition rather than a
+`# TODO`: the check itself went red the moment the exemption stopped matching, and
+somebody had to delete it. Neither guard is `continue-on-error` and neither is
+scoped to `src/` — a copy is precisely what does not show up in `src/`, and a check
+that cannot fail on the files it was written for is decoration.
 
 ### 2. Version is pinned
 
@@ -210,11 +197,14 @@ broken their training at the first line, silently, for people who are not on the
 
 This parses the dependency tables rather than grepping lines, which the earlier
 line-based version of this snippet did. Grepping does not survive contact with real
-repositories: `openroboto-backend/pyproject.toml` carries a paragraph of comments
-explaining why this package is not installed yet, and `openroboto-cli/pyproject.toml`
-has a `[tool.uv.sources]` entry plus its own comments — six lines total that mention
-`openroboto-protocol` without a `==`, none of them a dependency. The old snippet
-failed on both repositories for reasons that had nothing to do with pinning.
+repositories, and it still would not. Both consumers depend on this package for
+real today — `openroboto-backend/pyproject.toml` pins it with the `[schemas]`
+extra and `openroboto-cli/pyproject.toml` pins it without — and both surround
+that line with commentary. The cli
+file alone mentions `openroboto-protocol` on five further lines with no `==`
+anywhere near them (why the old `[tool.uv.sources]` override was deleted, what to
+use instead), and not one of them is a dependency. A line-based grep flagged every
+one of those and called the repository unpinned.
 
 Ceilings, both deliberate. A `[tool.uv.sources]` path or git override is **not**
 flagged, and that is the sharp edge: the override **bypasses the version
@@ -317,11 +307,15 @@ The publish job downloads the artifact the gates produced rather than rebuilding
 what reaches PyPI is the exact file that passed. It does not check the repository out
 at all: the only thing running with the OIDC token is `uv publish`.
 
-There is deliberately **no TestPyPI step**. The one thing it would add is "the index
-accepted an upload", and `twine check --strict` plus installing the wheel and
-importing every module already cover more than that. The cost is a second trusted
-publisher and a second environment to keep in sync — two configurations where only
-one will stay correct.
+**The tag-driven path does not go through TestPyPI.** A `publish-testpypi` job does
+exist in `release.yml`, but it is `workflow_dispatch` only and needs `testpypi`
+typed into a confirmation box, so a `v*` tag never reaches it — a release is
+gates → `pypi` environment → PyPI, with no rehearsal in between. The reasoning is
+that the one thing a rehearsal adds is "the index accepted an upload", and
+`twine check --strict` plus installing the built wheel and importing every module
+already cover more than that. Its cost is a second trusted publisher and a second
+environment to keep in sync, which is why it stays a manual escape hatch rather
+than a step everyone pays for.
 
 ## License
 

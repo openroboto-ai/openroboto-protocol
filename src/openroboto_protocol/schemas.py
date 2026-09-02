@@ -566,12 +566,10 @@ class QueueTask(Contract):
     miner_hotkey: str
     hf_repo_id: str
     hf_commit: str
-    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
-    #: input to the seed hash, and that position now holds `competitions.id`.
-    #: Leaving a number that decides nothing and no longer matches the seed is
-    #: worse than leaving nothing: it reads as a key somebody may safely branch
-    #: on. Which season a row belongs to is answered by `competition_id`, and
-    #: only by it.
+    #: 🔴 **No season ordinal is sent here, and none may be added back.** Which
+    #: season a row belongs to is answered by `competition_id`, and only by it.
+    #: A number that decides nothing and no longer feeds the seed is worse than
+    #: no number: it reads as a key somebody may safely branch on.
     #: The public face of the "seed derivation" red line. The worker's
     #: `select_init_seed()` reads it directly; the three below are what a miner needs to
     #: reproduce the seed derivation independently, and **not one of them may be
@@ -711,12 +709,10 @@ class ScoreSubmission(Contract):
     miner_hotkey: str | None = None
     hf_repo_id: str | None = None
     hf_commit: str | None = None
-    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
-    #: input to the seed hash, and that position now holds `competitions.id`.
-    #: Leaving a number that decides nothing and no longer matches the seed is
-    #: worse than leaving nothing: it reads as a key somebody may safely branch
-    #: on. Which season a row belongs to is answered by `competition_id`, and
-    #: only by it.
+    #: 🔴 **No season ordinal is sent here, and none may be added back.** Which
+    #: season a row belongs to is answered by `competition_id`, and only by it.
+    #: A number that decides nothing and no longer feeds the seed is worse than
+    #: no number: it reads as a key somebody may safely branch on.
     #: `libero` / `libero_pro` / `libero_pro_custom_1` / `libero_plus`.
     #: The worker's check is "missing is tolerable, present must match" — today the
     #: backend does not store it at all, so the check always takes the "old backend,
@@ -1031,18 +1027,13 @@ class SubmissionRecord(Contract):
     scores again** → hits the terminal-state guard / the unique index → 500 → checks
     again → retries again.
 
-    🔴 **A confirmed silent failure**: the worker only accepts
-    `status ∈ {"done","scored","failed"}`, while the backend now writes `evaluated` /
-    `eval_failed`, and since 0002 `done` has been forbidden by a CHECK.
-    That `unified_to_legacy_score()` in `protocol/status.py` writes the conversion but
-    is called from nowhere. The inference is that the check is **currently always
-    False**, and there is no alert anywhere on this path (the worker only logs a
-    warning, and that log is on the evaluation party's machine). **No conversion is done
-    here, deliberately** — both fixes (the backend converting to `done` at the exit /
-    asking the evaluation party to accept `evaluated`) need a human ruling, see spec 07
-    §10 Q2.
-    ⚠️ When this lands, **keep a conversion function and mark it TODO**; do not hide the
-    vocabulary disagreement inside a query.
+    🔴 **`status` carries the eight storable words verbatim** (`STORABLE_STATUSES`),
+    and **no alias conversion happens at this endpoint** (ruled 2026-09-02). The
+    worker's storage check only accepts `done` / `scored` / `failed`, so it is
+    currently always False, and there is no alert on this path (the worker logs a
+    warning, on the evaluation party's machine). Closing that gap is the evaluation
+    party's side of the contract; hiding a translation table inside our query is what
+    ZCY-158 already cost us.
 
     When not found it returns **200 plus `{}`**, not a 404: for the worker a 404 is
     permanent and would let it take "the task does not exist" as a reason to abandon a
@@ -1061,12 +1052,10 @@ class SubmissionRecord(Contract):
     miner_hotkey: str
     hf_repo_id: str
     hf_commit: str
-    #: 🔴 **No `round_num` here, removed 2026-08-27.** It used to be the second
-    #: input to the seed hash, and that position now holds `competitions.id`.
-    #: Leaving a number that decides nothing and no longer matches the seed is
-    #: worse than leaving nothing: it reads as a key somebody may safely branch
-    #: on. Which season a row belongs to is answered by `competition_id`, and
-    #: only by it.
+    #: 🔴 **No season ordinal is sent here, and none may be added back.** Which
+    #: season a row belongs to is answered by `competition_id`, and only by it.
+    #: A number that decides nothing and no longer feeds the seed is worse than
+    #: no number: it reads as a key somebody may safely branch on.
     #: The stored evaluation result = the body as it was at POST time. `None` when not
     #: evaluated yet (the DB holds `{}` or `""` — normalized to `null` at the exit, so
     #: the worker's check returns False, which is the **correct** result: it really was
@@ -1078,44 +1067,33 @@ class SubmissionRecord(Contract):
 
 
 #: The only three words the worker's storage check accepts (`worker.py:553`).
-#: This is **only a record** here, no conversion is done — see the TODO in the function
-#: below.
+#:
+#: ⚠️ **Deprecated, kept only as a record of what the other side accepts.** The
+#: ruling of 2026-09-02 is that `GET /api/submission/{task_id}` emits the eight
+#: storable words with no conversion, so nothing here consumes this set. It stays
+#: because `openroboto-backend/tests/test_worker_contract_parity.py` imports it to
+#: assert that the two vocabularies really do disagree; it goes when that test does.
 WORKER_ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
     {"done", "scored", "failed"}
 )
 
 
 def worker_status_alias(status: str) -> str:
-    """Canonical status word → the old word the worker knows. **⚠️ Nothing calls this
-    today, and that is deliberate.**
+    """Canonical status word → the older word the worker knows.
 
-    TODO(wire up after the ruling): which set of words the `status` of
-    `GET /api/submission/{task_id}` actually emits is a **blocking open question**
-    (spec 07 §10 Q2), and both roads need a human ruling:
+    ⚠️ **Deprecated, and nothing in the protocol calls it.** Ruled 2026-09-02:
+    `GET /api/submission/{task_id}` emits the words in `STORABLE_STATUSES` verbatim
+    and performs **no alias conversion**. Wiring this into a query would hide a
+    vocabulary disagreement inside a lookup, which is exactly what ZCY-158 cost us
+    (the translation table lived in the consumer, so nobody knew the two sides did
+    not match).
 
-    (a) The backend calls this function at that endpoint's exit and emits
-        `evaluated → done`. That is a fix for the worker and a breaking change for
-        everyone else reading this endpoint.
-    (b) Ask the evaluation party to add `evaluated` / `eval_failed` on the worker side.
-        That needs their cooperation, and `SCOPE.md` states "we do not decide their
-        integration schedule for them".
-
-    Before the ruling, `SubmissionRecord.status` **emits the canonical word from the DB
-    verbatim**. This function sits here instead of being wired secretly into a query so
-    that the vocabulary disagreement stays out in the open — the lesson of ZCY-158 is
-    that the translation table got hidden inside the consumer (the worker's
-    `_PROGRESS_STAGE_MAP` is still there today), so nobody knew the two sides did not
-    actually match.
-
-    Background (inferred, not measured): the worker's check is **currently always
-    False**. The backend now writes `evaluated` / `eval_failed`, and since 0002 `done`
-    has been forbidden by a CHECK. So every POST /score timeout or 5xx walks the full
-    retry path, and there is no alert anywhere on this path — the worker only calls
-    `logger.warning`, and that log is on the evaluation party's machine.
+    It survives only because `openroboto-backend`'s worker-contract parity test
+    imports it to show the mapping the evaluation party would have to apply on their
+    side. Delete it together with that test.
 
     Status words not in the table are **returned verbatim**, the same way
-    `status.normalize_status()` does it: this function is not responsible for judging
-    legality, that is `ALL_STATUSES`'s job.
+    `status.normalize_status()` does: judging legality is `ALL_STATUSES`'s job.
     """
     return {"evaluated": "done", "eval_failed": "failed"}.get(status, status)
 
@@ -1234,12 +1212,10 @@ class QueueStatusTask(Contract):
     hf_repo_id: str
     hf_commit: str
     submitted_at: datetime | None = None
-    #: 🔴 **No `round_num` here, removed 2026-08-27.** The comment that used to
-    #: sit here argued at length that every queued task "necessarily belongs to
-    #: some round" and that omitting it would make "forgot to fill it in"
-    #: representable. Both were true of a subnet with one season at a time. The
-    #: season a task belongs to is `competition_id`, and the seed no longer takes
-    #: a round number, so what is left here is a number nobody may branch on.
+    #: 🔴 **No season ordinal is sent here, and none may be added back.** The
+    #: season a task belongs to is `competition_id`, and only that. An ordinal
+    #: cannot locate one — `(sim, 1)` and `(real, 1)` share it — so what would be
+    #: left is a number nobody may branch on.
     reason: Reason | None = None
     #: The progress bar data. The contract card calls it "progress", but in history the
     #: same data is called `detail` — one thing with two names is exactly what this file
@@ -1364,8 +1340,8 @@ class SubmissionHistoryItem(Contract):
     #: none" and its neighbour says "there is one".
     #:
     #: Why 0 will not do — `drand_round` is the sharpest of them: drand's official API
-    #: returns **HTTP 200** for `/public/0`, and the content is **the latest round of
-    #: that day** (an alias of `latest`, measured 2026-08-19). An auditor taking the
+    #: returns **HTTP 200** for `/public/0`, and the content is **that day's latest
+    #: drand_round** (an alias of `latest`, measured 2026-08-19). An auditor taking the
     #: `drand_round: 0` we published and looking it up gets no error and no 404; they
     #: get a beacon from today, and then `verify_seed()` is necessarily False — and they
     #: have no way to judge whether we cheated or the data is missing. This package's
@@ -1431,8 +1407,8 @@ class SubmissionHistoryItem(Contract):
         Looking at `seed` alone you cannot tell "the seed really is 0" from "no seed was
         ever dispatched", but together with the other two you can: **the time a seed
         really was dispatched, all three fields necessarily have values at once** (the
-        inputs of `derive_seed` are exactly block_hash + round + drand_random, and with
-        any one of them missing it cannot be computed).
+        inputs of `derive_seed` are exactly block_hash + competition_id +
+        drand_random, and with any one of them missing it cannot be computed).
 
         In the 2026-08-19 production copy all 20 rows with `seed=0` have this shape, and
         11 of them have already been scored and entered the leaderboard — their
@@ -1457,8 +1433,8 @@ class SubmissionHistoryItem(Contract):
                 f"incomplete seed triple: {missing} missing. "
                 "The fields that are set claim a seed was derived; the ones that "
                 "are absent claim it was not. derive_seed() needs all three of "
-                "block_hash, round and drand_random, so this record cannot be "
-                "reproduced."
+                "block_hash, competition_id and drand_random, so this record "
+                "cannot be reproduced."
             )
         return self
 
@@ -1545,7 +1521,8 @@ class SubmissionDetail(Contract):
     """
 
     submission_id: str
-    round_id: int
+    #: The season this submission was filed under (`competitions.id`).
+    competition_id: int
     miner: MinerRef
     model: ModelRef
     eval_status: str
@@ -1636,24 +1613,10 @@ class ScanRejectionsResponse(Contract):
 #: (King-of-the-Hill is not "ranked further down").
 LeaderboardStatus = Literal["champion", "scored"]
 
-#: The values of the round `status`: **it carries the round lifecycle only.**
-#:
-#: Production computes it as "the mapping of the eval_status of the latest submission of
-#: that round", and the consequence is that the round status flips back and forth
-#: following the last submission: measured 2026-08-17, `/rounds/current` returned
-#: `settled` while at the same moment `submission_count=117` was still growing and the
-#: champion had just changed at 09:33 — **a round that is still running declaring itself
-#: settled to the outside world.** The round status is a property of the round, not a
-#: property of some submission.
-#: (There is no defensible definition for a third `scoring` state, see spec 04 §9 Q2; it
-#: does not enter the vocabulary before that is ruled on.)
-RoundStatus = Literal["live", "settled"]
-
-#: The set forms, same source as the two `Literal`s above. Tests use them to assert that
-#: **these two vocabularies have zero overlap with the lifecycle words** — "one
-#: response, one vocabulary" is one of the reasons this module exists.
+#: The set form, same source as the `Literal` above. Tests use it to assert that
+#: **this vocabulary has zero overlap with the lifecycle words** — "one response, one
+#: vocabulary" is one of the reasons this module exists.
 LEADERBOARD_STATUSES: Final[frozenset[str]] = frozenset(get_args(LeaderboardStatus))
-ROUND_STATUSES: Final[frozenset[str]] = frozenset(get_args(RoundStatus))
 
 
 class TasksPassed(Contract):
@@ -1661,9 +1624,9 @@ class TasksPassed(Contract):
     `passed = count(score >= 0.5)`, `total = 6`.
 
     Production counts the number of rows across **all attempts** of that miner in that
-    round; measured, uid 218 shows `12/12` while other rows in the same table show `6/6`
-    — two dimensions in one column. `total` must not fall back to 40 either (that is
-    `benchmark/meta.tasks_per_round`, which is not the same thing as the 6 suites).
+    season; measured, uid 218 shows `12/12` while other rows in the same table show
+    `6/6` — two dimensions in one column. `total` must not fall back to 40 either (that
+    is `benchmark/meta.tasks_per_round`, which is not the same thing as the 6 suites).
     """
 
     passed: int = 0
@@ -1689,11 +1652,13 @@ class LeaderboardRow(Contract):
     """
 
     rank: int
-    #: The round this row belongs to. Production has it and the new skeleton's model
-    #: missed it — deleting it makes whoever reads it get undefined.
-    round_num: int
+    #: `competitions.seq` — which season of this track the row belongs to, **for
+    #: display only**. It cannot locate a season on its own (`(sim, 1)` and
+    #: `(real, 1)` share it), so nothing may branch on it; `competition` on the
+    #: response says which season was actually computed.
+    seq: int
     #: The `task_id` of the task that produced the score. **Falling back to building
-    #: `task_{hotkey}_r{round}_v1` is forbidden**: the hardcoded `_v1` does not match
+    #: `task_{hotkey}_r{seq}_v1` is forbidden**: the hardcoded `_v1` does not match
     #: the real attempt number, and the audit link then points at a submission that does
     #: not exist.
     submission_id: str
@@ -1720,8 +1685,8 @@ class LeaderboardRow(Contract):
 
 
 class Baseline(Contract):
-    """The baseline model. **Same source and same value** as `round.base_model` of
-    `/rounds/current`.
+    """The baseline model. **Same source and same value** as the `base_model` of
+    `GET /api/v1/competitions/{id}`.
     """
 
     model_name: str
@@ -1739,123 +1704,22 @@ class Baseline(Contract):
 
 
 class LeaderboardResponse(Contract):
-    """The top-level keys are exactly these 5. A round that does not exist returns empty
-    rows, **not a 404**.
+    """The top-level keys are exactly these 5. A season that does not exist returns
+    empty rows, **not a 404**.
     """
 
-    round_id: int
+    #: Echo of **which season was actually computed** (`competitions.id`) — with no
+    #: `?competition=` that is the current one, not `null`. It echoes what was
+    #: computed, not what was asked for.
+    competition: int
     #: Server-side UTC instant, **the only field allowed to vary between calls**
     #: (invariant 4: everything else is idempotent field by field).
     generated_at: datetime
     baseline: Baseline
-    #: The total number of rows on that round's leaderboard (after filtering), unrelated
-    #: to `limit` / `offset`.
+    #: The total number of rows on that season's leaderboard (after filtering),
+    #: unrelated to `limit` / `offset`.
     total: int = 0
     rows: list[LeaderboardRow] = Field(default_factory=list)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# GET /api/v1/rounds/current · GET /api/v1/rounds
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class Champion(Contract):
-    """The current champion = the projection of leaderboard rank 1. The whole object is
-    `null` when nobody is on the leaderboard.
-    """
-
-    miner_hotkey: str
-    miner_name: str
-    model_name: str
-    #: **Must equal the `score.mean` of `/leaderboard` rank 1** (cross-endpoint
-    #: consistency assertion 2).
-    score: float
-    #: This round's leading score − the champion score of **the previous round (id-1,
-    #: the earlier one)**. Production makes `prev` point at the newer round inside a
-    #: DESC iteration, so every sign is flipped (frontend measured `-0.029`, should be
-    #: `+0.026`).
-    delta_vs_prev_champion: float | None = None
-    #: The `MAX(evaluated_at)` of the task that produced the score.
-    settled_at: datetime | None = None
-    #: Always `True`; it means "incumbent", **not "how long they have held it"**.
-    held: bool = True
-
-
-class RoundSummaryEntry(Contract):
-    """One entry in the round list."""
-
-    id: int
-    #: `f"Round {id:02d}"`, and `f"G{id:02d}"` when `id >= 100`. Do not change it, the
-    #: frontend history table displays it directly.
-    label: str
-    status: RoundStatus
-    champion: Champion | None = None
-
-
-class RoundDetail(Contract):
-    """The detail of the current round.
-
-    `round.id` comes from `settings.CURRENT_ROUND` (whose only source is
-    `backend.yaml`); **control.json is not read** (ADR 01).
-    """
-
-    id: int
-    label: str
-    status: RoundStatus
-    network: str
-    base_model: ModelRef
-    #: The number of `submissions` rows in that round, **including rejected /
-    #: superseded** (measured 117, while the leaderboard's `total=3` — the two numbers
-    #: are not the same thing, and the frontend displays them separately).
-    submission_count: int = 0
-    #: There is no rounds table, so it cannot be made up → always `null`. **Do not pad
-    #: it with local time.**
-    started_at: datetime | None = None
-    ends_at: datetime | None = None
-    champion: Champion | None = None
-
-
-class CurrentRoundResponse(Contract):
-    """`{"round": {...}}`.
-
-    This is a data structure, not an envelope, and the frontend is written hard against
-    it — **do not "optimize" it into a bare object**.
-    When the whole DB is empty it is `{"round": null}` plus 200, **not**
-    `{"error": "no rounds found"}` plus 200 (using 200 to express failure has already
-    forced the frontend to normalize at the boundary), and **not** a 404.
-    """
-
-    round: RoundDetail | None = None
-
-
-class RoundsSummary(Contract):
-    """⚠️ Both fields are **whole-set figures and do not vary with `limit`**. Production
-    counts within the returned page, so changing `limit` changes the summary numbers.
-
-    `cumulative_improvement = the champion score of the latest settled round − the
-    champion score of the earliest round`, and **a forward improvement is a positive
-    number**; with fewer than 2 rounds it is `0.0`. Production writes
-    `scores[-1] - scores[0]` while the sequence is DESC, which equals "earliest −
-    latest", so the sign is flipped just the same (frontend measured `-0.122`, should be
-    `+0.122`).
-    """
-
-    rounds_settled: int = 0
-    cumulative_improvement: float = 0.0
-
-
-class RoundHistoryResponse(Contract):
-    """`{summary, rounds, total}`, with `rounds` in **descending** order by `id`.
-
-    `rounds` must contain **the current round, even with zero submissions** — production
-    only takes `SELECT DISTINCT round_num FROM submissions`, so a freshly opened round
-    with nobody having submitted yet does not appear, while `/rounds/current` does have
-    it: the two endpoints contradict each other.
-    """
-
-    summary: RoundsSummary
-    rounds: list[RoundSummaryEntry] = Field(default_factory=list)
-    total: int = 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1893,13 +1757,13 @@ class Competition(Contract):
 
     Anything durable keys on **`(track, seq)`** — which is what
     `ux_competitions_track_seq` makes unique, and what a payload with no `cid` is
-    resolved by (`(sim, round_num=r)`). Concretely, the CLI's `miner.yaml` stores
+    resolved by (`(sim, seq=r)`). Concretely, the CLI's `miner.yaml` stores
     `track` + `seq`, resolves them against this endpoint at submit time, and puts the
     `id` it got back into the commitment. Storing the `id` instead saves one lookup and
     costs a season's entry fee the day it is wrong.
 
-    `seq` is also the display number (`Round 07` in the frontend); it counts from 1
-    **within a track**, so `(sim, 1)` and `(real, 1)` are two different competitions.
+    `seq` is also the display number; it counts from 1 **within a track**, so
+    `(sim, 1)` and `(real, 1)` are two different competitions.
 
     ## `params` stays open on purpose
 
@@ -1923,7 +1787,7 @@ class Competition(Contract):
     track: Track
     #: 1-based, per track.
     seq: int
-    #: For humans (`π0.5`, `xArm 6 第一届`). Never matched on.
+    #: For humans (`π0.5`, `xArm 6 Season 1`). Never matched on.
     label: str
     #: Which evaluation implementation runs this season (`sim_openpi`, `sim_lingbot`,
     #: `real_xarm6`). Left as an open `str`: the vocabulary grows with every new season,
@@ -2050,9 +1914,9 @@ class LivenessResponse(Contract):
     process crashed 74 times in 5 days with nobody noticing). A DB problem should
     **take the instance out of traffic** (`/readyz` 503), not restart the process.
 
-    The key set is exactly these three. ⚠️ `round` / `netuid` are **an echo of this
-    process's configuration**, not domain truth — consumers **must not** use them as the
-    current round (that one is at `GET /api/v1/rounds/current`).
+    The key set is exactly these three. ⚠️ `competition` / `netuid` are **an echo of
+    this process's configuration**, not domain truth — consumers **must not** read them
+    as "which season is open" (that is `GET /api/v1/competitions`).
     They are kept so that even while it is running you can see at a glance which
     configuration the process actually loaded.
 
@@ -2062,7 +1926,9 @@ class LivenessResponse(Contract):
     up".
     """
 
-    round: int
+    #: `settings.CURRENT_COMPETITION_ID` as this process loaded it — an id, not an
+    #: ordinal.
+    competition: int
     netuid: int
     status: Literal["ok"] = "ok"
 
@@ -2155,7 +2021,7 @@ class MediaRef(Contract):
     #: empty object is not evidence, and the backend's presign request already
     #: declares `bytes: Field(gt=0, le=MAX_EVIDENCE_BYTES)` for the same value
     #: (`08-23-evidence-upload-hashing`), so 0 or a negative reaches it only to be
-    #: rejected one round-trip later — after the operator has already uploaded.
+    #: rejected one request later — after the operator has already uploaded.
     #: The **upper** bound stays on the backend: it is an ops setting
     #: (`MAX_EVIDENCE_BYTES`), and freezing it here would mean releasing this
     #: package to raise it — the same reason `episode_idx` has no upper bound.
@@ -2274,9 +2140,9 @@ class EpisodeResult(Contract):
 #: whole endpoint returning 500** — for a worker a 5xx is the "write the DB twice"
 #: button (spec 07 §0.3).
 #: `tests/test_schemas.py` checks this table one by one: the field really exists and
-#: really is a `str`, and the other three vocabularies in this module (leaderboard
-#: position / round / stage) have zero overlap with the lifecycle words, preventing
-#: anyone from quietly introducing a fifth vocabulary on some model.
+#: really is a `str`, and the other vocabularies in this module (leaderboard position
+#: and stage) have zero overlap with the lifecycle words, preventing anyone from
+#: quietly introducing another vocabulary on some model.
 STATUS_VALUED_FIELDS: Final[tuple[tuple[type[Contract], str], ...]] = (
     (QueueTask, "eval_status"),
     (QueueStatusTask, "eval_status"),
@@ -2296,18 +2162,15 @@ __all__ = [
     "QUEUE_SUMMARY_BUCKETS",
     "REASON_CODES",
     "REASON_SOURCES",
-    "ROUND_STATUSES",
     "STATUS_VALUED_FIELDS",
     "WORKER_ACCEPTED_STATUSES",
     "Baseline",
     "BenchmarkMeta",
     "BenchmarkSpec",
-    "Champion",
     "Competition",
     "CompetitionStatus",
     "Contract",
     "ContractError",
-    "CurrentRoundResponse",
     "EnvScore",
     "Envelope",
     "EpisodeFailure",
@@ -2342,11 +2205,6 @@ __all__ = [
     "Reason",
     "ReasonCode",
     "ReasonSource",
-    "RoundDetail",
-    "RoundHistoryResponse",
-    "RoundStatus",
-    "RoundSummaryEntry",
-    "RoundsSummary",
     "ScanRejection",
     "ScanRejectionsResponse",
     "ScoreAccepted",

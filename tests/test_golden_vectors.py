@@ -2,13 +2,13 @@
 changing one row means rewriting history.
 
 Data source: the production PostgreSQL dump
-``openroboto-backend/tests/fixtures/prod-data.sql`` (round 1, netuid 80),
+``openroboto-backend/tests/fixtures/prod-data.sql`` (`(sim, 1)`, netuid 80),
 taken from the records in the ``submissions`` and ``submissions_master`` tables
 that have all three of seed / block_hash / drand_random, deduplicated by
-(block_hash, round_num, drand_random).
+(block_hash, competition_id, drand_random).
 
 The drand randomness values were spot-checked against the public beacon
-(rounds 6347967 / 6370589 match the randomness returned by
+(drand_rounds 6347967 / 6370589 match the randomness returned by
 https://api.drand.sh verbatim), confirming that they really are public beacon
 values and not numbers the backend made up itself.
 
@@ -22,8 +22,8 @@ import pytest
 
 from openroboto_protocol.seed import SEED_MAX, SeedInputs, derive_seed, verify_seed
 
-#: Reproducible historical vectors: (block_hash, round_num, drand_random, seed)
-#: 42 of them, covering every round 1 submission that can be recomputed from the
+#: Reproducible historical vectors: (block_hash, competition_id, drand_random, seed)
+#: 42 of them, covering every `(sim, 1)` submission that can be recomputed from the
 #: stored inputs.
 GOLDEN_SEEDS: tuple[tuple[str, int, str, int], ...] = (
     (  # uid 109 · drand round 6347967
@@ -281,7 +281,7 @@ GOLDEN_SEEDS: tuple[tuple[str, int, str, int], ...] = (
 )
 
 #: ⚠️ The unreproducible list
-#: (block_hash, round_num, drand_random, seed stored in the DB, seed recomputed
+#: (block_hash, competition_id, drand_random, seed stored in the DB, seed recomputed
 #: from the stored inputs)
 #:
 #: These 3 (uid 60 / 194 / 192) are **not** golden vectors; they must not go into
@@ -289,7 +289,7 @@ GOLDEN_SEEDS: tuple[tuple[str, int, str, int], ...] = (
 #: cannot be derived from **the inputs stored in the DB**. In other words, the
 #: inputs that actually took part in the derivation are not the ones that ended
 #: up persisted, and the real inputs are gone. Which step overwrote the inputs
-#: was not established this time round, and guesses are not written down here.
+#: was not established this time, and guesses are not written down here.
 #: Acknowledged: do not retroactively bless them, do not edit the data, do not
 #: stuff them into the golden vectors — otherwise the test stays red forever.
 #:
@@ -322,23 +322,23 @@ UNREPRODUCIBLE_SEEDS: tuple[tuple[str, int, str, int, int], ...] = (
 
 
 @pytest.mark.parametrize(
-    ("block_hash", "round_num", "drand_random", "seed"), GOLDEN_SEEDS
+    ("block_hash", "competition_id", "drand_random", "seed"), GOLDEN_SEEDS
 )
 def test_golden_seed_is_reproducible(
-    block_hash: str, round_num: int, drand_random: str, seed: int
+    block_hash: str, competition_id: int, drand_random: str, seed: int
 ) -> None:
     """Every evaluation that happened on chain must still derive the same seed
     today."""
-    assert derive_seed(block_hash, round_num, drand_random) == seed
-    assert verify_seed(seed, block_hash, round_num, drand_random)
-    assert SeedInputs(block_hash, round_num, drand_random).verify(seed)
+    assert derive_seed(block_hash, competition_id, drand_random) == seed
+    assert verify_seed(seed, block_hash, competition_id, drand_random)
+    assert SeedInputs(block_hash, competition_id, drand_random).verify(seed)
 
 
 @pytest.mark.parametrize(
-    ("block_hash", "round_num", "drand_random", "seed"), GOLDEN_SEEDS
+    ("block_hash", "competition_id", "drand_random", "seed"), GOLDEN_SEEDS
 )
 def test_golden_seed_is_uint32(
-    block_hash: str, round_num: int, drand_random: str, seed: int
+    block_hash: str, competition_id: int, drand_random: str, seed: int
 ) -> None:
     """Every historical seed falls inside the uint32 range — the column storing
     the seed must be BIGINT to hold it."""
@@ -354,21 +354,21 @@ def test_golden_vector_set_is_intact() -> None:
 
 
 @pytest.mark.parametrize(
-    ("block_hash", "round_num", "drand_random", "stored_seed", "derived_seed"),
+    ("block_hash", "competition_id", "drand_random", "stored_seed", "derived_seed"),
     UNREPRODUCIBLE_SEEDS,
 )
 def test_unreproducible_seed_stays_unreproducible(
     block_hash: str,
-    round_num: int,
+    competition_id: int,
     drand_random: str,
     stored_seed: int,
     derived_seed: int,
 ) -> None:
     """These 3 are known not to match. The recomputed results are pinned down —
     if they change, the formula has been touched."""
-    assert derive_seed(block_hash, round_num, drand_random) == derived_seed
+    assert derive_seed(block_hash, competition_id, drand_random) == derived_seed
     assert derived_seed != stored_seed
-    assert not verify_seed(stored_seed, block_hash, round_num, drand_random)
+    assert not verify_seed(stored_seed, block_hash, competition_id, drand_random)
 
 
 def test_unreproducible_list_is_exactly_three() -> None:
