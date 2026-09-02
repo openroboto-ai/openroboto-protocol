@@ -9,9 +9,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.10.0"
+uv add "openroboto-protocol==0.11.0"
 # or
-pip install "openroboto-protocol==0.10.0"
+pip install "openroboto-protocol==0.11.0"
 ```
 
 ```python
@@ -32,7 +32,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.10.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.11.0"   # backend only
 ```
 
 ## Why this package exists
@@ -84,20 +84,17 @@ The version number *is* the contract version.
 > `schemas.py` and the vocabularies in `status.py` may still change without a
 > major bump.
 >
-> This is deliberate, and it ends on a specific event, not on a date:
-> **`openroboto-backend` and `openroboto-cli` have not agreed on the version
-> they go live against.** Both install and import this package today — the
-> backend's three hand-copied mirrors (`app/domain/worker_reports.py`,
-> `app/domain/reasons.py`, the copied block in `app/api/envelope.py`) were
-> deleted on 2026-08-19/20 and every one of them is an import now — but the two
-> consumers are pinned a minor apart: the backend on `0.10.0`, the CLI on
-> `0.9.0`. Freezing a contract while the two sides still resolve to different
-> code would freeze whatever shape it happens to have, not the shape
-> integration proves it needs.
+> The reason it stayed 0.x was that a contract nobody had really consumed would
+> only freeze the shape it happened to have grown into. That reason is gone:
+> `openroboto-backend` and `openroboto-cli` both install and import this package
+> and both pin an exact version, the backend's three hand-copied mirrors
+> (`app/domain/worker_reports.py`, `app/domain/reasons.py`, the copied block in
+> `app/api/envelope.py`) were deleted on 2026-08-19/20, `normalize_weights` moved
+> in, and every module declares its public surface.
 >
-> **`1.0.0` ships when backend and CLI lock their launch versions against it.**
-> From that release on, the table below is binding and going back to `0.x`
-> is not an option — `tests/test_version.py` enforces exactly that.
+> **`1.0.0` is a decision now, not a blocker** — the owner's, and it is not made
+> yet. From that release on the table below is binding and going back to `0.x`
+> is not an option; `tests/test_version.py` enforces exactly that.
 
 | Bump | Meaning |
 | --- | --- |
@@ -105,7 +102,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.10.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.11.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
@@ -201,9 +198,9 @@ that cannot fail on the files it was written for is decoration.
 This parses the dependency tables rather than grepping lines, which the earlier
 line-based version of this snippet did. Grepping does not survive contact with real
 repositories, and it still would not. Both consumers depend on this package for
-real today — `openroboto-backend/pyproject.toml` pins
-`openroboto-protocol[schemas]==0.10.0` and `openroboto-cli/pyproject.toml` pins
-the same package at `0.9.0` — and both surround that line with commentary. The cli
+real today — `openroboto-backend/pyproject.toml` pins it with the `[schemas]`
+extra and `openroboto-cli/pyproject.toml` pins it without — and both surround
+that line with commentary. The cli
 file alone mentions `openroboto-protocol` on five further lines with no `==`
 anywhere near them (why the old `[tool.uv.sources]` override was deleted, what to
 use instead), and not one of them is a dependency. A line-based grep flagged every

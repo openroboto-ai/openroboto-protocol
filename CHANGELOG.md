@@ -20,6 +20,83 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.11.0 — 2026-09-02
+
+**Every identifier that called a competition a "round" is renamed.** Breaking for
+0.x consumers, and **nothing on chain or in a golden vector moved**: the payload
+key is still the byte `r`, `derive_seed` produces the same uint32 for the same
+three inputs, and all 122 golden vectors are green without one value being
+edited.
+
+### Miners already running: nothing to do
+
+The commitment JSON is byte-for-byte what it was. `r` is still `r`, `cid` is
+still `cid`, key order is unchanged, and a payload that used neither `cid` nor
+`m` encodes exactly as it did at 0.6.0. Only Python attribute names moved.
+
+### `openroboto-backend` / `openroboto-cli`: mechanical, and the compiler finds it
+
+Every rename below is an attribute or parameter, so an unported call site is an
+`AttributeError` or a `TypeError`, not a wrong value. There is no shape where the
+old name silently keeps working.
+
+| Was | Is | Where |
+|---|---|---|
+| `seed.derive_seed(block_hash, round_num, …)` | `seed.derive_seed(block_hash, competition_id, …)` | second parameter |
+| `seed.verify_seed(…, round_num, …)` | `seed.verify_seed(…, competition_id, …)` | third parameter |
+| `seed.SeedInputs.round_num` | `seed.SeedInputs.competition_id` | field |
+| `commitment.CommitmentPayload.round_num` | `commitment.CommitmentPayload.claimed_competition_seq` | field, wire key `r` unchanged |
+| `schemas.LeaderboardRow.round_num` | `schemas.LeaderboardRow.seq` | wire field |
+| `schemas.LeaderboardResponse.round_id` | `schemas.LeaderboardResponse.competition` | wire field |
+| `schemas.SubmissionDetail.round_id` | `schemas.SubmissionDetail.competition_id` | wire field |
+| `schemas.LivenessResponse.round` | `schemas.LivenessResponse.competition` | wire field |
+
+**Why `claimed_competition_seq` and not `claimed_competition_id`.** The payload
+already carries `competition_id` for `cid`, which is the `competitions.id`
+primary key. `r` is a different thing: self-reported by the miner, and an
+**ordinal within the simulation track** — the backend resolves it as
+`find_competition(track="sim", seq=r)`. Calling it an id would send the next
+reader looking it up as a primary key. `competition_id` stays with `cid` because
+that is what `cid` is.
+
+Three of the four wire renames are the backend catching up with itself, not new
+work: it renamed `LeaderboardRow.round_num` to `seq` on 2026-08-31, `/api/rank`'s
+`round_num` to `seq` on 2026-09-01, and `/healthz`'s `round` key to `competition`
+on 2026-09-01. `SubmissionDetail` is the one going the other way — it still emits
+`round_id` and follows this package.
+
+### Removed: the contract models for the retired `/rounds` endpoints
+
+`GET /api/v1/rounds` and `GET /api/v1/rounds/current` have been 410 tombstones
+since 2026-09-01 (an ordinal cannot locate a season — `(sim, 1)` and `(real, 1)`
+share it — so the whole family was replaced by `/api/v1/competitions`). Their
+models described nothing callable and are gone: `Champion`, `RoundStatus`,
+`ROUND_STATUSES`, `RoundSummaryEntry`, `RoundDetail`, `CurrentRoundResponse`,
+`RoundsSummary`, `RoundHistoryResponse`. Neither consumer repo imports any of
+them.
+
+### Deprecated, not removed: `worker_status_alias` / `WORKER_ACCEPTED_STATUSES`
+
+`GET /api/submission/{task_id}` emits the eight storable words verbatim and does
+no alias conversion (ruled 2026-09-02), which closes the TODO these carried. They
+stay because `openroboto-backend`'s worker-contract parity test imports both to
+assert the two vocabularies are disjoint; they go when that test does.
+
+### Also in this release
+
+- Every module now declares `__all__` — `constants`, `seed` and `model_hash` were
+  the three without one — each pinned by a `test_public_surface_is_pinned` case.
+  That completes the last of the four 1.0.0 preconditions, so **1.0.0 is now a
+  decision rather than a blocker**; it is the owner's to make and is not made.
+- The PyPI classifier drops to `Development Status :: 4 - Beta`, matching a
+  README that says compatibility is not promised while the version is 0.x.
+- Everything in this repository is written in English, including this file.
+
+### The evaluation worker and external validators
+
+`/api/rank` already sends `seq` and `/healthz` already sends `competition`; both
+changed on the backend before this release. Nothing else they read moves.
+
 ## 0.10.0 — 2026-09-01
 
 ### Two new stages: `queued` / `stalled`

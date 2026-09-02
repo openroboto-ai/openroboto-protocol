@@ -158,7 +158,7 @@ Measured: `import openroboto_protocol` 0.24 ms, `openroboto_protocol.schemas` 74
 All 24 real imports across the two consumer repos are the submodule shape and
 **none takes a symbol from the top level** — migration cost is zero.
 
-Consumers pin an exact version (`openroboto-protocol==0.10.0`, the README is
+Consumers pin an exact version (`openroboto-protocol==0.11.0`, the README is
 authoritative). Floating versions and vendored copies are both rejected by consumer
 CI (both checks are quoted in the README under "What consumers must add to their
 own CI", and both already run in `openroboto-backend` and `openroboto-cli`).
