@@ -571,6 +571,8 @@ def test_module_exports_are_pinned() -> None:
     """``__all__`` is what SemVer's promise is about; without it there is no
     criterion separating a patch from a major (AGENTS.md §1②)."""
     assert model_format.__all__ == [
+        "AXIS_BENCHMARK_PREFIX",
+        "AXIS_LAYOUT",
         "INCOMPLETE_FILE_SUFFIXES",
         "LEGACY_NORM_STATS_RELPATHS",
         "LEGACY_PYTORCH_WEIGHTS_FILE",
@@ -593,4 +595,63 @@ def test_module_exports_are_pinned() -> None:
         "OpenpiLayout",
         "check_checkpoint_layout",
         "check_lingbot_layout",
+        "openpi_layout_for",
     ]
+
+
+# ── AXIS: the same openpi checkpoint, a different asset id ─────────────────────
+
+AXIS_STATS = "assets/axis-v0.1-task501-runtime-v1/norm_stats.json"
+AXIS_CHECKPOINT = (
+    "params/_METADATA",
+    "params/manifest.ocdbt",
+    "params/d/0abc",
+    AXIS_STATS,
+)
+
+
+def test_an_axis_checkpoint_is_clean_under_the_axis_layout() -> None:
+    """The stats sit where the AXIS evaluator reads them — no warning, no error.
+
+    Under the LIBERO layout the very same repo drew ``non_canonical_norm_stats``
+    and the CLI refused to pay for it, although the evaluator loads it fine."""
+    report = model_format.check_checkpoint_layout(
+        _f(*AXIS_CHECKPOINT), layout=model_format.AXIS_LAYOUT
+    )
+    assert report.errors == () and report.warnings == ()
+    assert report.kind is not None
+
+
+def test_the_libero_layout_still_flags_axis_stats() -> None:
+    """The default is unchanged: nothing that passed or failed before moves."""
+    report = model_format.check_checkpoint_layout(_f(*AXIS_CHECKPOINT))
+    assert [w.code for w in report.warnings] == [
+        FormatIssueCode.NON_CANONICAL_NORM_STATS
+    ]
+
+
+def test_libero_stats_are_non_canonical_for_an_axis_season() -> None:
+    """Moving the stats to the LIBERO path to silence the old warning is the one
+    fix that breaks the AXIS evaluator — so under the AXIS layout it warns."""
+    report = model_format.check_checkpoint_layout(
+        _f("params/_METADATA", "params/d/0abc", NORM_STATS),
+        layout=model_format.AXIS_LAYOUT,
+    )
+    assert [w.code for w in report.warnings] == [
+        FormatIssueCode.NON_CANONICAL_NORM_STATS
+    ]
+
+
+@pytest.mark.parametrize(
+    ("benchmark", "layout"),
+    [
+        ("axis_v1.0", model_format.AXIS_LAYOUT),
+        ("axis_v1.12", model_format.AXIS_LAYOUT),
+        ("libero_pro_custom_1", model_format.LIBERO_LAYOUT),
+        (None, model_format.LIBERO_LAYOUT),
+    ],
+)
+def test_the_layout_follows_the_season_task_set(
+    benchmark: str | None, layout: model_format.OpenpiLayout
+) -> None:
+    assert model_format.openpi_layout_for(benchmark) is layout

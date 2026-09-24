@@ -1870,6 +1870,14 @@ class Competition(Contract):
     #: and no registry has an entry for it — so it turns a loud "not decided" into a
     #: quiet lookup miss somewhere further downstream.
     base_model_family: Annotated[str, Field(min_length=1)] | None = None
+    #: Which task set the season is scored on (``libero_pro_custom_1``,
+    #: ``axis_v1.0``, …). An open ``str`` for the same reason as ``adapter``: AXIS
+    #: publishes a new version every rotation, and none of them may need a release of
+    #: this package. ``None`` = not decided, or a track that does not run one (real).
+    #:
+    #: It decides where an openpi checkpoint keeps its normalization stats — see
+    #: :func:`openroboto_protocol.model_format.openpi_layout_for`.
+    benchmark: str | None = None
     #: The frozen spec — fee, qualification threshold, camera count, image size…
     #: Read the class docstring before reading `params["fee"]["coldkey"]`.
     params: dict[str, Any] = Field(default_factory=dict)
