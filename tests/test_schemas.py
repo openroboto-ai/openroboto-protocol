@@ -1293,9 +1293,86 @@ def test_competition_track_is_the_commitment_vocabulary() -> None:
     """
     assert _competition().track is Track.SIM
     assert _competition(track="real").track is Track.REAL
+    assert _competition(track="task").track is Track.TASK
     assert _competition().model_dump(mode="json")["track"] == "sim"
+    assert _competition(track="task").model_dump(mode="json")["track"] == "task"
     with pytest.raises(ValidationError):
         _competition(track="banana")
+
+
+#: The body `GET /api/v1/competitions` serves once `track='task'` is in the
+#: default list, trimmed to the two rows that matter here. Written out as JSON
+#: rather than built through `Competition(...)`: what has to be repaired is the
+#: **parsing** of a list that contains a task row, and a constructor call would
+#: bypass exactly that step. The task row's values are the shape OPE-98's
+#: operator endpoint writes, not a season that exists yet.
+_COMPETITIONS_WITH_TASK = """\
+{
+  "data": [
+    {
+      "id": 2,
+      "track": "sim",
+      "seq": 2,
+      "label": "LingBot-VLA 2.0",
+      "adapter": "sim_lingbot",
+      "status": "active",
+      "submit_opens_at": null,
+      "submit_closes_at": null,
+      "eval_starts_at": null,
+      "eval_ends_at": null,
+      "champion_announced_at": null,
+      "base_repo": null,
+      "base_revision": null,
+      "base_model_family": null,
+      "params": {"fee": {"amount_tao": 0.1, "kind": "burn", "coldkey": null}}
+    },
+    {
+      "id": 4,
+      "track": "task",
+      "seq": 1,
+      "label": "Task authoring, season 1",
+      "adapter": "task_authoring",
+      "status": "active",
+      "submit_opens_at": null,
+      "submit_closes_at": null,
+      "eval_starts_at": null,
+      "eval_ends_at": null,
+      "champion_announced_at": null,
+      "base_repo": null,
+      "base_revision": null,
+      "base_model_family": null,
+      "params": {
+        "fee": {"amount_tao": 0.1, "kind": "burn", "coldkey": null},
+        "task": {"source": "axis"}
+      }
+    }
+  ],
+  "meta": {
+    "request_id": "01J8Z0P4Q8W3N5X7Y9A2B4C6D8",
+    "generated_at": "2026-10-28T00:00:00Z",
+    "page": {"total": 2, "limit": 2, "offset": 0, "has_more": false}
+  }
+}
+"""
+
+
+def test_a_competitions_list_containing_a_task_row_parses() -> None:
+    """The CLI parses `/api/v1/competitions` as one `ListEnvelope[Competition]`,
+    so a single unrecognized `track` costs the miner **the whole list** — the
+    simulation season included — not just the row it did not know.
+
+    0.11.0 has `sim` / `real` only; this body raises there. 0.12.0 adds
+    `Track.TASK` and this is the body it has to accept. That is why the backend
+    keeps `track='task'` out of the default list until a CLI carrying this
+    version is out: flipping the default first takes `init` / `status` down for
+    every miner who has not upgraded.
+    """
+    parsed = s.ListEnvelope[s.Competition].model_validate_json(_COMPETITIONS_WITH_TASK)
+    assert [row.track for row in parsed.data] == [Track.SIM, Track.TASK]
+    assert parsed.data[1].adapter == "task_authoring"
+    assert parsed.data[1].params["task"]["source"] == "axis"
+    # Same envelope, same parse path the CLI uses -- nothing task-specific.
+    assert parsed.meta.page.total == 2
 
 
 def test_liveness_status_is_a_constant() -> None:

@@ -1765,6 +1765,17 @@ class Competition(Contract):
     `seq` is also the display number; it counts from 1 **within a track**, so
     `(sim, 1)` and `(real, 1)` are two different competitions.
 
+    ## `track` says what a submission to this season *is*
+
+    `sim` and `real` take a **model checkpoint**: `i` is a HuggingFace repo, and
+    on `real` the payload also carries `m`, the fingerprint of those weights.
+    `task` takes a **task package** instead — `i` names the package the miner
+    authored, `m` is absent, and `cid` is mandatory (`commitment.check_payload`
+    spells out all three). A consumer that is about to train a model therefore
+    chooses among the `sim` / `real` rows; picking a `task` row by position
+    builds a workspace around a season whose submission is something else
+    entirely, and the entry fee is what finds out.
+
     ## `params` stays open on purpose
 
     It is `jsonb` on the database side because every season changes it. Parsing it into
@@ -1783,7 +1794,7 @@ class Competition(Contract):
     #: Local to one database. See "Which value is the key" above.
     id: int
     #: The same `Track` the commitment codec takes, imported rather than re-spelled: a
-    #: second copy of `sim` / `real` is a second thing to keep in sync.
+    #: second copy of the track vocabulary is a second thing to keep in sync.
     track: Track
     #: 1-based, per track.
     seq: int

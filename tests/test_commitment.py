@@ -426,10 +426,10 @@ def test_payload_is_frozen() -> None:
 # Derived vectors (NOT on-chain history)
 # ═══════════════════════════════════════════════════════════════════
 #
-# The `cid` key does not exist on chain yet: `sim seq=2` and the first real-track
-# season only go active once 0.7.0 has shipped. GV-5 and GV-6 are therefore
-# **derived and constructed values, not on-chain facts** — the discipline "change
-# one and you have rewritten history" applies to GV-1 ~ GV-4 above, not here.
+# GV-5, GV-6 and GV-7 are **derived and constructed values, not on-chain
+# facts**: no payload carrying `cid` has been recorded in this file. The
+# discipline "change one and you have rewritten history" applies to GV-1 ~ GV-4
+# above, not here.
 #
 # ⏳ When the first commitment carrying a `cid` is really on chain, come back and
 # replace GV-5 with the real bytes, and move it up into the on-chain section.
@@ -462,6 +462,12 @@ GV6_PAYLOAD = CommitmentPayload(
     competition_id=9223372036854775807,
     model_hash="d" * 64,
 )
+
+# GV-7: the task track — GV-1's fields plus `cid`, and no `m`. A task submission
+# burns for the season `cid` names (OPE-98), so its byte shape is GV-5's exactly:
+# the repository is a task package, not weights, and a fingerprint would be 71
+# bytes spent on a value nothing reads.
+GV7_PAYLOAD = dataclasses.replace(GV1_PAYLOAD, competition_id=4)
 
 
 def test_sim_payload_without_cid_is_byte_identical_to_0_6_0() -> None:
@@ -540,6 +546,22 @@ def test_gv6_real_worst_case_fits_on_chain() -> None:
     # The fixed cost is the number to quote when someone wants to add a key.
     empty_repo = dataclasses.replace(GV6_PAYLOAD, hf_repo_id="")
     assert len(encode(empty_repo)) == GV6_REAL_FIXED_BYTES == 368
+
+
+def test_gv7_task_payload_is_the_sim_shape_plus_cid() -> None:
+    """A task submission names the task season and carries no `m`.
+
+    The key set is GV-5's exactly, `cid` included: the repository named by `i` is
+    a task package rather than a checkpoint, so there is no weights fingerprint
+    to pin. Requiring `m` here would stop every task submission at the CLI's
+    pre-flight — before the fee is paid, but also with nothing the miner could
+    add to get past it.
+    """
+    blob = encode(GV7_PAYLOAD)
+    assert json.loads(blob).keys() == {"s", "h", "c", "r", "i", "b", "bb", "cid"}
+    assert decode(blob).payload == GV7_PAYLOAD
+    assert decode(blob).payload.competition_id == 4
+    check_payload(GV7_PAYLOAD, Track.TASK)
 
 
 def test_a_real_payload_with_the_longest_possible_repo_id_is_refused() -> None:
@@ -651,6 +673,30 @@ def test_check_payload_demands_a_competition_id_on_the_real_track() -> None:
     with pytest.raises(CommitmentFieldError) as exc:
         check_payload(dataclasses.replace(GV6_PAYLOAD, competition_id=None), Track.REAL)
     assert exc.value.field == "cid"
+    assert "real-track" in str(exc.value)
+
+
+def test_check_payload_demands_a_competition_id_on_the_task_track() -> None:
+    """A task season has no ordinal to fall back on either: without `cid` the
+    submission is read as `(sim, seq=claimed_competition_seq)` and a task
+    package is filed against the simulation leaderboard, with the fee spent."""
+    with pytest.raises(CommitmentFieldError) as exc:
+        check_payload(dataclasses.replace(GV7_PAYLOAD, competition_id=None), Track.TASK)
+    assert exc.value.field == "cid"
+    assert "task-track" in str(exc.value)
+
+
+def test_check_payload_does_not_demand_a_model_hash_on_the_task_track() -> None:
+    """`m` is the fingerprint of weights, and a task package has no weights.
+
+    It is not required — that would block the whole task track at the
+    pre-flight — and a stray one is not rejected either, because nothing
+    downstream reads it and inventing that rule here would put a second
+    vocabulary of "what a task payload may carry" beside the backend's.
+    """
+    assert GV7_PAYLOAD.model_hash is None
+    check_payload(GV7_PAYLOAD, Track.TASK)
+    check_payload(dataclasses.replace(GV7_PAYLOAD, model_hash="d" * 64), Track.TASK)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -658,10 +704,16 @@ def test_check_payload_demands_a_competition_id_on_the_real_track() -> None:
 # ═══════════════════════════════════════════════════════════════════
 
 
-def test_track_has_exactly_two_values() -> None:
-    """The same two words as the `ck_competitions_track` CHECK in the backend's
-    0003 migration."""
-    assert sorted(t.value for t in Track) == ["real", "sim"]
+def test_track_has_exactly_three_values() -> None:
+    """The same three words as the `ck_competitions_track` CHECK — `sim` / `real`
+    from the backend's 0003 migration, `task` from 0029.
+
+    Pinned as a set rather than left to whatever exists: a fourth word reaching
+    this enum is a contract change, and `schemas.Competition` starts accepting a
+    track the committed payload rules below have never been written for.
+    """
+    assert sorted(t.value for t in Track) == ["real", "sim", "task"]
+    assert Track("task") is Track.TASK
 
 
 def test_track_rejects_an_unknown_value_loudly() -> None:

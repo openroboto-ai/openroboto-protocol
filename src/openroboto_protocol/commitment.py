@@ -178,7 +178,7 @@ _HEX: Final = frozenset("0123456789abcdef")
 
 
 class Track(StrEnum):
-    """The two tracks of the subnet — the value set of `competitions.track`.
+    """The tracks of the subnet — the value set of `competitions.track`.
 
     ⚠️ **It is not read from the payload**: there is no `t` key on chain (see the
     module docstring). The side that can resolve the season row — the backend —
@@ -188,10 +188,19 @@ class Track(StrEnum):
     carries the offending value. Silently treating it as `sim` would put a
     real-track submission on the simulation leaderboard *after* the miner has
     already paid the entry fee.
+
+    `TASK` is the same on-chain envelope as `SIM` — a burn for the entry fee and
+    no `m` — but `i` names a **task package** the miner wrote instead of a model
+    checkpoint, and `cid` is mandatory: a task season has no ordinal fallback,
+    so a payload without `cid` would be read as a simulation submission of a
+    model. A consumer choosing a season to train in must therefore choose among
+    `SIM` / `REAL`; a `TASK` row is a season somebody else's models will be
+    evaluated on.
     """
 
     SIM = "sim"
     REAL = "real"
+    TASK = "task"
 
 
 class DecodeFailure(StrEnum):
@@ -496,7 +505,22 @@ def check_payload(payload: CommitmentPayload, track: Track) -> None:
     Both sides call it, which is the whole point: the CLI in its pre-flight, the
     backend when it ingests the commitment and knows which season — and
     therefore which track — the payload belongs to. Two hand-written copies of
-    "what does the real track require" is how the field set drifts.
+    "what does this track require" is how the field set drifts.
+
+    What each track requires beyond the commit format in `c`:
+
+    | track | also required |
+    |---|---|
+    | `sim` | nothing — a payload without `cid` is read as `(sim, seq=r)` |
+    | `task` | `cid` — a task season has no ordinal to fall back on |
+    | `real` | `cid`, and `m` |
+
+    Without `cid` a `task` payload is read as a **simulation submission of a task
+    package**: `(sim, seq=claimed_competition_seq)` is the only fallback there is.
+
+    `m` is **not** required on `task`: the repository is a task package and
+    carries no weights fingerprint. Demanding one would stop every task
+    submission at the CLI's pre-flight, before the fee.
 
     ⚠️ It is **not** called by `decode()`. History has to stay readable: empty
     `hf_commit` values are on chain already, and rejecting them at decode time
@@ -512,14 +536,20 @@ def check_payload(payload: CommitmentPayload, track: Track) -> None:
         )
     if track is Track.SIM:
         return
-    # The real track, and only the real track, adds two requirements.
+    # Everything that is not `sim` has to name its season: the ordinal fallback
+    # is defined as `(sim, seq=claimed_competition_seq)`, so without `cid` the
+    # submission is filed against the simulation leaderboard.
     if payload.competition_id is None:
         raise CommitmentFieldError(
             "cid",
-            "a real-track submission must name its season; without it the "
-            "submission is read as (sim, seq=claimed_competition_seq)",
+            f"a {track.value}-track submission must name its season; without it "
+            "the submission is read as (sim, seq=claimed_competition_seq)",
             None,
         )
+    if track is Track.TASK:
+        # A task package has no fingerprint — see the docstring above.
+        return
+    # The real track, and only the real track, adds a fingerprint.
     if payload.model_hash is None:
         raise CommitmentFieldError(
             "m",

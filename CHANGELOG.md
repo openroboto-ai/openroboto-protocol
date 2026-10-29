@@ -20,6 +20,61 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.12.0 — 2026-10-29
+
+**A third track: `Track.TASK`.** `commitment.Track` and `schemas.Competition`
+accept `"task"`, and `check_payload` gives it rules of its own. Nothing on chain
+moves and no existing vector is edited.
+
+### Miners already running: the bytes are untouched, the upgrade is not optional
+
+`encode()` writes the same seven / eight / nine keys as before, GV-1 is still the
+295 real bytes of block 8808332, and every historical seed reproduces. A CLI pinned
+to 0.11.0 parses today's competition list exactly as it did.
+
+The problem is the list it will be handed next. A `track='task'` season is a new
+row in `competitions`, and `openroboto-cli` parses `/api/v1/competitions` as one
+`ListEnvelope[Competition]` — **one unrecognized word rejects the whole list, not
+just that row**. `init` and `status` would fail for every miner, including the ones
+who only care about simulation. The backend therefore keeps `track='task'` out of
+the default list until a CLI carrying this release is out, and asks for it with
+`?include_task=true` in the meantime. Upgrade before that default flips.
+
+### `openroboto-backend` / `openroboto-cli`: raise the pin
+
+No import changes. In the CLI, `preflight.payload_track()` already does
+`Track(snapshot.track)`, which used to raise on a task season and now returns
+`Track.TASK`; `check_payload` then requires `cid` and not `m`.
+
+⚠️ The CLI's `init` offers every row the list returns, by number. Once the backend
+flips `include_task`, a `task` season appears in that menu, and choosing it builds a
+workspace around a season that takes task packages instead of model checkpoints.
+`Competition`'s docstring now says so at the source; narrowing that menu is a CLI
+change, not a protocol one.
+
+| track | required beyond a valid `c` |
+|---|---|
+| `sim` | nothing — no `cid` is read as `(sim, seq=r)` |
+| `task` | `cid` |
+| `real` | `cid`, `m` |
+
+`m` is **not** required on `task`: `i` names a task package, and a package has no
+weights fingerprint. Requiring one would stop every task submission at the
+pre-flight, before the fee — with nothing the miner could add to get past it.
+
+### The evaluation worker and external validators
+
+Nothing they read moves. They never take `track` from this package — the worker
+reads the dispatch payload — and the one list that gains the new word stays opt-in
+until the backend flips it.
+
+### Vectors
+
+GV-1 ~ GV-6 are unchanged. GV-7 is added under the derived section: a task payload,
+whose key set is GV-5's exactly. On the schema side,
+`tests/test_schemas.py::test_a_competitions_list_containing_a_task_row_parses` pins
+the wire body that 0.11.0 rejects and this release accepts.
+
 ## 0.11.0 — 2026-09-02
 
 **Every identifier that called a competition a "round" is renamed.** Breaking for
