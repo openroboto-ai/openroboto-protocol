@@ -9,9 +9,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.12.0"
+uv add "openroboto-protocol==0.13.0"
 # or
-pip install "openroboto-protocol==0.12.0"
+pip install "openroboto-protocol==0.13.0"
 ```
 
 ```python
@@ -32,7 +32,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.12.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.13.0"   # backend only
 ```
 
 ## Why this package exists
@@ -52,6 +52,7 @@ copy-paste away from happening.
 | --- | --- | --- |
 | `seed.py` | Seed derivation — block hash + competition id + drand randomness → uint32 | Backend derives it, miners verify it |
 | `commitment.py` | Commitment payload encode / decode | Miners write it on chain, backend reads it |
+| `package_digest.py` | Task-package file list and content digest | Miner CLI, admission worker and evaluation layer must compute the same number |
 | `model_hash.py` | Model fingerprinting | Both compute it; a mismatch rejects a submission |
 | `model_format.py` | What a submittable checkpoint must contain | Miners export to it, the evaluator rejects against it |
 | `status.py` | Task status and stage vocabulary | Backend, worker and frontend all render it |
@@ -70,9 +71,14 @@ Getting it wrong burns TAO for nothing — the evaluator rejects bare LoRA
 adapters at a pre-eval check. The rule is shared, so it belongs here, and
 `openroboto check` reads it from this package.
 
-**What never belongs here:** I/O of any kind, database access, secrets, backend
+**What never belongs here:** network I/O, database access, secrets, backend
 business logic. A pure function can be proven identical on both sides; a function
-that makes an HTTP call cannot.
+that makes an HTTP call cannot. The one filesystem read is `package_digest.py`,
+and it is deliberate: the task-package digest is defined over the bytes under a
+directory, so leaving the walk to each consumer would create the second rule this
+package exists to prevent. It reads only the directory it is given — no
+environment, clock, network or config — and its output is a pure function of
+those bytes.
 
 ## Versioning is a promise
 
@@ -102,7 +108,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.12.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.13.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)

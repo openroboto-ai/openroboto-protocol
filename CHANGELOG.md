@@ -22,15 +22,22 @@ disagree, the commit is the authority.
 
 ## 0.13.0 — 2026-11-05
 
-**A third track: `Track.TASK`.** `commitment.Track` and `schemas.Competition`
-accept `"task"`, and `check_payload` gives it rules of its own. Nothing on chain
-moves and no existing vector is edited.
+> **Candidate, not released.** This section describes a locally built wheel; it
+> becomes the contract only when the `v0.13.0` tag is pushed and its release
+> approval is given. Do not pin `0.13.0` before PyPI serves it.
+
+**Two additions on top of 0.12.0: `Track.TASK` and one shared task-package
+digest.** `commitment.Track` and `schemas.Competition` accept `"task"`,
+`check_payload` gives it rules of its own, and `package_digest` becomes the
+single implementation of the digest the miner, the admission worker and the
+evaluation layer compute. Nothing on chain moves and no existing vector is
+edited.
 
 ### Miners already running: the bytes are untouched, the upgrade is not optional
 
 `encode()` writes the same seven / eight / nine keys as before, GV-1 is still the
 295 real bytes of block 8808332, and every historical seed reproduces. A CLI pinned
-to 0.11.0 parses today's competition list exactly as it did.
+to 0.12.0 parses today's competition list exactly as it did.
 
 The problem is the list it will be handed next. A `track='task'` season is a new
 row in `competitions`, and `openroboto-cli` parses `/api/v1/competitions` as one
@@ -62,18 +69,56 @@ change, not a protocol one.
 weights fingerprint. Requiring one would stop every task submission at the
 pre-flight, before the fee — with nothing the miner could add to get past it.
 
+### Shared task-package digest
+
+`openroboto_protocol.package_digest` is new: `package_files()`,
+`digest_of_files()` and `package_digest()`. The rule is a byte-for-byte port of
+the validator's `task_source/package.py` at `e5fee86a`:
+
+1. recurse over every regular file under the package root, with no whitelist and
+   no exclusions; a symlink to a regular file is counted, a symlinked directory
+   is not descended into;
+2. sort the paths **as paths**, not as strings (`a/c.txt` before `a-b.txt`);
+3. per file, `sha256(read_bytes())`;
+4. digest the UTF-8 bytes of `"\n".join(f"{path}\0{file_sha256}")`.
+
+It is a new module rather than additions to an existing one, and it is the
+**only** module in this package that reads the filesystem. The walk and the
+read are part of the contract — a digest computed from a caller's own walk is a
+second rule, and that is what this release removes. The output is a pure
+function of the bytes under the directory; no environment, clock or network is
+read.
+
+### Migrating the miner CLI and the validator
+
+Both had their own copy of the same function; neither is a second authority.
+
+- `openroboto-cli` (`src/openroboto/task_package.py`) — replace its
+  `package_files` / `digest_of_files` / `package_digest` with imports from
+  `openroboto_protocol.package_digest`. Re-exporting the old names from
+  `task_package` keeps its internal call sites unchanged. Its golden
+  (`c9ed7c72…`) is the same value the protocol test now pins.
+- `validator` (`task_source/package.py`) — the same three functions are now
+  provided here; keep `load_package` / `discover_packages` and the rest of
+  `task_source` in place. `package_files()`'s return shape is unchanged, so
+  `digest_of_files(package_files(root))` is a drop-in.
+- `openroboto-backend` — it stores the digest the admission worker reports and
+  does not recompute it; no import is needed unless it starts verifying locally.
+
 ### The evaluation worker and external validators
 
 Nothing they read moves. They never take `track` from this package — the worker
 reads the dispatch payload — and the one list that gains the new word stays opt-in
-until the backend flips it.
+until the backend flips it. The digest they report is byte-identical before and
+after the move to `package_digest`, because the implementation was ported, not
+reinterpreted.
 
 ### Vectors
 
 GV-1 ~ GV-6 are unchanged. GV-7 is added under the derived section: a task payload,
 whose key set is GV-5's exactly. On the schema side,
 `tests/test_schemas.py::test_a_competitions_list_containing_a_task_row_parses` pins
-the wire body that 0.11.0 rejects and this release accepts.
+the wire body that 0.12.0 rejects and this release accepts.
 
 ## 0.12.0 — 2026-09-24
 

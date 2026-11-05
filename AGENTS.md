@@ -34,12 +34,21 @@ Spec §5: change seed derivation and historical evaluations stop reproducing.
 dependencies = []   # keep it this way
 ```
 
-Pure functions and plain data. **The moment this package makes a network request or
-reads a file, the two sides can no longer be proven to agree** — and "provably in
-agreement" is its only reason to exist.
+Pure functions and plain data, with **one narrow exception** (`package_digest.py`,
+below). The moment this package makes a network request or reads anything other
+than the directory it was handed, the two sides can no longer be proven to agree —
+and "provably in agreement" is its only reason to exist.
 
 The half that needs I/O stays in the caller: `derive_seed()` here,
 `fetch_drand()` in the backend.
+
+**The exception: `package_digest.py` reads the task-package directory it is
+given.** The digest is defined over the bytes under a directory, so it cannot be
+computed from a file list the caller assembled — a caller's own walk is a second
+rule, and a second rule is exactly the drift this package exists to prevent. The
+module reads nothing else: no environment, clock, network or config, and its
+output is a pure function of those bytes. Every other module stays I/O-free; do
+not read this as licence for a second exception.
 
 Before adding a dependency, ask whether a miner's environment should pay for it.
 (If `schemas.py` needs pydantic, discuss it separately; do not reach for `uv add`.)
@@ -158,7 +167,7 @@ Measured: `import openroboto_protocol` 0.24 ms, `openroboto_protocol.schemas` 74
 All 24 real imports across the two consumer repos are the submodule shape and
 **none takes a symbol from the top level** — migration cost is zero.
 
-Consumers pin an exact version (`openroboto-protocol==0.12.0`, the README is
+Consumers pin an exact version (`openroboto-protocol==0.13.0`, the README is
 authoritative). Floating versions and vendored copies are both rejected by consumer
 CI (both checks are quoted in the README under "What consumers must add to their
 own CI", and both already run in `openroboto-backend` and `openroboto-cli`).
@@ -206,6 +215,7 @@ the irreproducible list with the reason, or the suite is red forever.
 src/openroboto_protocol/
 ├── seed.py           seed derivation: block hash + competition id + drand → uint32
 ├── commitment.py     commitment payload encode / decode
+├── package_digest.py task-package file list and content digest
 ├── model_hash.py     model fingerprint
 ├── model_format.py   what a submittable checkpoint must look like
 ├── status.py         task status + stage vocabulary
