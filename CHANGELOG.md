@@ -20,7 +20,7 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
-## 0.12.0 — 2026-10-29
+## 0.13.0 — 2026-11-05
 
 **A third track: `Track.TASK`.** `commitment.Track` and `schemas.Competition`
 accept `"task"`, and `check_payload` gives it rules of its own. Nothing on chain
@@ -74,6 +74,36 @@ GV-1 ~ GV-6 are unchanged. GV-7 is added under the derived section: a task paylo
 whose key set is GV-5's exactly. On the schema side,
 `tests/test_schemas.py::test_a_competitions_list_containing_a_task_row_parses` pins
 the wire body that 0.11.0 rejects and this release accepts.
+
+## 0.12.0 — 2026-09-24
+
+**openpi checkpoints are judged by the layout of the season's task set.** AXIS
+seasons read the normalization stats from
+`assets/axis-v0.1-task501-runtime-v1/norm_stats.json`, not the LIBERO path. Until
+now the only openpi layout was LIBERO's, so a correctly built AXIS checkpoint drew
+`non_canonical_norm_stats` — and `openroboto submit` refuses to pay on any warning.
+Additive; nothing that passed or failed before changes unless a caller opts in.
+
+### Miners already running: nothing to do
+
+No payload, seed or fingerprint moved. The fix reaches miners through the CLI
+release that pins this version.
+
+### `openroboto-backend` / `openroboto-cli`
+
+- `model_format.AXIS_LAYOUT`, `model_format.openpi_layout_for(benchmark)` and
+  `model_format.AXIS_BENCHMARK_PREFIX` are new. `openpi_layout_for` returns the AXIS
+  layout for any `axis_v*` task set and the LIBERO layout otherwise, including
+  `None`.
+- `check_checkpoint_layout(files, *, layout=LIBERO_LAYOUT, ...)` takes the layout.
+  The default is the old behaviour.
+- `schemas.Competition.benchmark: str | None` — the season's task set, as served
+  by `/api/v1/competitions`. Before this it was dropped on parse.
+
+### The evaluation worker and external validators
+
+Nothing they read moved.
+
 
 ## 0.11.0 — 2026-09-02
 

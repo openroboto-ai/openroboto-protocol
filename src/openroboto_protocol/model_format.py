@@ -48,6 +48,8 @@ from enum import StrEnum
 from typing import Final
 
 __all__ = [
+    "AXIS_BENCHMARK_PREFIX",
+    "AXIS_LAYOUT",
     "INCOMPLETE_FILE_SUFFIXES",
     "LEGACY_NORM_STATS_RELPATHS",
     "LEGACY_PYTORCH_WEIGHTS_FILE",
@@ -70,6 +72,7 @@ __all__ = [
     "OpenpiLayout",
     "check_checkpoint_layout",
     "check_lingbot_layout",
+    "openpi_layout_for",
 ]
 
 
@@ -248,7 +251,34 @@ LIBERO_LAYOUT: Final = OpenpiLayout(
     pytorch_weights_file="model.safetensors",
     jax_params_dir="params",
 )
-"""The only layout the subnet currently accepts: openpi + the LIBERO asset."""
+"""openpi + the LIBERO asset: the seasons scored on LIBERO task sets."""
+
+AXIS_LAYOUT: Final = OpenpiLayout(
+    asset_id="axis-v0.1-task501-runtime-v1",
+    pytorch_weights_file="model.safetensors",
+    jax_params_dir="params",
+)
+"""openpi + the AXIS asset: the seasons scored on an AXIS task set.
+
+The asset id is the one the AXIS evaluator's ``pi05_axis_joint`` config reads, and
+the one every AXIS season's starting checkpoint ships. It does not change between
+AXIS task-set versions: a rotation adds tasks, not a new normalization."""
+
+AXIS_BENCHMARK_PREFIX: Final = "axis_v"
+"""AXIS task sets are named ``axis_v<major>.<minor>``; a new one every rotation."""
+
+
+def openpi_layout_for(benchmark: str | None) -> OpenpiLayout:
+    """The openpi layout a season's task set is evaluated with.
+
+    ``None`` (a season that has not named its task set, or a caller that does not
+    know it) keeps the LIBERO layout, which is what every openpi season used before
+    task sets were named.
+    """
+    if benchmark is not None and benchmark.startswith(AXIS_BENCHMARK_PREFIX):
+        return AXIS_LAYOUT
+    return LIBERO_LAYOUT
+
 
 LEGACY_PYTORCH_WEIGHTS_FILE: Final = "pytorch_model.bin"
 """Production admission has historically accepted this name. The evaluator
@@ -544,9 +574,15 @@ def _matches(path: str, relpath: str) -> bool:
 def check_checkpoint_layout(
     files: Iterable[CheckpointFile],
     *,
+    layout: OpenpiLayout = LIBERO_LAYOUT,
     allowed_path_segments: frozenset[str] = frozenset(),
 ) -> FormatReport:
-    """Judge whether a file list can be submitted as a checkpoint.
+    """Judge whether a file list can be submitted as an openpi checkpoint.
+
+    ``layout`` says where the evaluator looks for the normalization stats — pick it
+    with :func:`openpi_layout_for` from the season's ``benchmark``. Judging an AXIS
+    checkpoint by the LIBERO layout warns that its (correctly placed) stats are in
+    the wrong place.
 
     ``allowed_path_segments`` overrides :data:`REJECTED_PATH_SEGMENTS`
     (it corresponds to the production setting ``scanner.hf_allow_dotfiles``).
@@ -601,15 +637,15 @@ def check_checkpoint_layout(
 
         # Directory-shaped markers are looked for in the middle segments of the
         # path, file-shaped markers in the whole path.
-        if LIBERO_LAYOUT.jax_params_dir in parts[:-1]:
+        if layout.jax_params_dir in parts[:-1]:
             has_jax = True
-            weights_depths.append(parts.index(LIBERO_LAYOUT.jax_params_dir))
-        if _matches(file.path, LIBERO_LAYOUT.pytorch_weights_file):
+            weights_depths.append(parts.index(layout.jax_params_dir))
+        if _matches(file.path, layout.pytorch_weights_file):
             has_pytorch = True
             weights_depths.append(len(parts) - 1)
         if _matches(file.path, LEGACY_PYTORCH_WEIGHTS_FILE):
             has_legacy_weights = True
-        if _matches(file.path, LIBERO_LAYOUT.norm_stats_relpath):
+        if _matches(file.path, layout.norm_stats_relpath):
             has_canonical_stats = True
         if any(_matches(file.path, rel) for rel in LEGACY_NORM_STATS_RELPATHS):
             has_legacy_stats = True
@@ -624,8 +660,8 @@ def check_checkpoint_layout(
                     "this is a bare LoRA adapter, not a checkpoint — the "
                     "evaluator does no merging. Merge the adapter back into the "
                     "pi0.5 base and upload the full "
-                    f"checkpoint ('{LIBERO_LAYOUT.pytorch_weights_file}' or "
-                    f"'{LIBERO_LAYOUT.jax_params_dir}/').",
+                    f"checkpoint ('{layout.pytorch_weights_file}' or "
+                    f"'{layout.jax_params_dir}/').",
                 )
             )
         else:
@@ -633,9 +669,9 @@ def check_checkpoint_layout(
                 FormatIssue(
                     FormatIssueCode.MISSING_WEIGHTS,
                     "no model weights found — expected openpi PyTorch weights "
-                    f"('{LIBERO_LAYOUT.pytorch_weights_file}') or a JAX orbax "
+                    f"('{layout.pytorch_weights_file}') or a JAX orbax "
                     "checkpoint "
-                    f"('{LIBERO_LAYOUT.jax_params_dir}/')",
+                    f"('{layout.jax_params_dir}/')",
                 )
             )
     elif has_legacy_weights and not (has_pytorch or has_jax):
@@ -643,8 +679,8 @@ def check_checkpoint_layout(
             FormatIssue(
                 FormatIssueCode.UNLOADABLE_WEIGHTS_FORMAT,
                 f"'{LEGACY_PYTORCH_WEIGHTS_FILE}' passes submission admission but the "
-                f"evaluator loads only '{LIBERO_LAYOUT.pytorch_weights_file}' or "
-                f"'{LIBERO_LAYOUT.jax_params_dir}/' — it will be rejected before "
+                f"evaluator loads only '{layout.pytorch_weights_file}' or "
+                f"'{layout.jax_params_dir}/' — it will be rejected before "
                 "the GPU runs",
             )
         )
@@ -663,7 +699,7 @@ def check_checkpoint_layout(
         errors.append(
             FormatIssue(
                 FormatIssueCode.MISSING_NORM_STATS,
-                f"missing normalization stats: {LIBERO_LAYOUT.norm_stats_relpath} — "
+                f"missing normalization stats: {layout.norm_stats_relpath} — "
                 "inference cannot normalize the state or unnormalize the "
                 "actions without them",
             )
@@ -673,7 +709,7 @@ def check_checkpoint_layout(
             FormatIssue(
                 FormatIssueCode.NON_CANONICAL_NORM_STATS,
                 "normalization stats are not at the canonical path "
-                f"{LIBERO_LAYOUT.norm_stats_relpath}; the evaluator reads only "
+                f"{layout.norm_stats_relpath}; the evaluator reads only "
                 "that path",
             )
         )

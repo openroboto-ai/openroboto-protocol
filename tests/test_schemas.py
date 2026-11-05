@@ -279,6 +279,7 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "base_repo",
         "base_revision",
         "base_model_family",
+        "benchmark",
         "params",
     },
     # —— real track: one episode per request ——
