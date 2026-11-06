@@ -16,9 +16,9 @@ Codex / Cursor, so the two do not drift apart).
   evaluation party, external validators, anyone who clicks into the source after
   `pip install`. Written here as well because the default is to follow whatever
   language a repository already uses.
-- Documentation and engineering conventions follow
-  `~/Playground/quantitative-trading-agent-service/CLAUDE.md`. Read it before
-  writing docs or creating directories; do not restate it from memory.
+- Documentation conventions are AGENTS.md §8; engineering conventions follow
+  `~/Playground/quantitative-trading-agent-service/CLAUDE.md`. Read them before
+  writing docs or creating directories; do not restate them from memory.
 - Every line in this package is on the money path. State the reason before touching
   any released function.
 - Order of authority when documents disagree: **production behaviour > executable
