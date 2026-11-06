@@ -306,7 +306,38 @@ every one of them is on the money path, so there is no reason to leave a gap.
 
 - Cameron's ruling log, shared by the three repos and outranking everything here:
   `../openroboto-backend/DECISIONS.md`
-- Engineering and documentation conventions:
-  `~/Playground/quantitative-trading-agent-service/CLAUDE.md`
+- Engineering conventions:
+  `~/Playground/quantitative-trading-agent-service/CLAUDE.md`.
+  Documentation conventions are §8 below and take precedence over it
 - Rebuild workspace notes: `../README.md`
 - Related decisions: `../openroboto-backend/docs/adr/`
+
+## 8. Documentation conventions
+
+Shared by every OpenRoboto repository; the private ones carry the Chinese
+original. This repository is public, so file names and titles are English.
+
+- One `docs/` per repository: cross-repository, project-level documents live in
+  the workspace root `docs/`; documents about one repository live in that
+  repository's `docs/`.
+- One directory per type: `product/` · `specs/` · `architecture/` · `adr/` ·
+  `plans/` · `research/` · `reports/` · `runbooks/` · `archive/`.
+- File names are `NN-title.md`: `NN` is a two-digit sequence within the
+  directory, continuing from the current highest; no date prefixes; code
+  identifiers stay as they are. A multi-part set numbers the whole folder
+  (`reports/03-audit/00-overview.md`).
+- Every document opens with `- Date:`, `- Status:` (draft / in progress /
+  confirmed / ended / partly superseded / deprecated / archived), `- Author:`,
+  `- Related:`.
+- Superseded documents are not deleted: set the status to deprecated, name what
+  supersedes them, and move them to `archive/`; anything already in `archive/`
+  keeps its name. Identical copies are kept once, in the place these rules put
+  them.
+- README / AGENTS / CLAUDE / CHANGELOG are never renamed or numbered. Material
+  that ships with the code or is written for outside readers (public docs,
+  documents for customers or investors) is left as it is.
+- Credential files such as `*.secrets*` are neither read nor referenced. A
+  plaintext secret (API key, password, private key) found in a document is not
+  copied anywhere; it is reported separately so it can be rotated.
+- Facts, decisions, plans, assumptions and open questions are written
+  separately; a guess is never written as a conclusion.
