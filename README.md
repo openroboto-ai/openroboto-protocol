@@ -5,13 +5,18 @@ miners, the evaluation worker, and the web frontend. Bittensor **netuid 80**.
 
 ## Install
 
+This checkout is the **unpublished 0.14.0 candidate**. For local integration,
+build with `uv build --wheel` and install that exact wheel. The index commands
+below apply after the approved release exists; they are not a claim that the
+candidate is already on PyPI.
+
 Pin the exact version. A floating range means two sides of the subnet can resolve
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.13.0"
+uv add "openroboto-protocol==0.14.0"
 # or
-pip install "openroboto-protocol==0.13.0"
+pip install "openroboto-protocol==0.14.0"
 ```
 
 ```python
@@ -32,7 +37,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.13.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.14.0"   # backend only
 ```
 
 ## Why this package exists
@@ -53,6 +58,7 @@ copy-paste away from happening.
 | `seed.py` | Seed derivation — block hash + competition id + drand randomness → uint32 | Backend derives it, miners verify it |
 | `commitment.py` | Commitment payload encode / decode | Miners write it on chain, backend reads it |
 | `package_digest.py` | Task-package file list and content digest | Miner CLI, admission worker and evaluation layer must compute the same number |
+| `task_contract.py` | Versioned authoring options, explicit public synopsis and reference limits | Authors, backend and workers reject the same unsupported data |
 | `model_hash.py` | Model fingerprinting | Both compute it; a mismatch rejects a submission |
 | `model_format.py` | What a submittable checkpoint must contain | Miners export to it, the evaluator rejects against it |
 | `status.py` | Task status and stage vocabulary | Backend, worker and frontend all render it |
@@ -108,7 +114,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.13.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.14.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)

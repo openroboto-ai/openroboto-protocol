@@ -20,6 +20,24 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.14.0 — 2026-11-07 (candidate)
+
+This checkout is an unpublished candidate. Build a wheel for local integration;
+do not substitute it for a published index release or reuse the 0.13.0 version.
+
+Adds `task_contract`, a zero-I/O, zero-dependency contract for a restricted Panda
+tabletop authoring profile, explicit public summaries and reference action
+budgets. The CLI and admission worker share the same profile digest and boundary
+findings. The profile binds its fixed scene/assets manifest; passing these pure
+checks does not establish physical solvability or reward eligibility.
+
+Existing chain encoders, package digests, released outputs and golden vectors are
+unchanged. Old task documents remain readable when no operator policy requires
+the new profile; a partially supplied new contract is invalid. A supplied public
+summary is explicit author data, never inferred from a legacy private instruction.
+Consumers adopting the new authoring profile must pin this version and agree on
+its frozen profile reference. Runtime scene inspection stays in the worker.
+
 ## 0.13.0 — 2026-11-05
 
 > **Candidate, not released.** This section describes a locally built wheel; it
