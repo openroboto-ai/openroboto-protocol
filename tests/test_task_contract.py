@@ -415,3 +415,18 @@ def test_profile_checker_vocabulary_requires_the_exact_reference() -> None:
     ref = execution_profile_ref()
     ref["digest"] = "0" * 64
     assert checker_types_for_profile(ref) == ()
+
+
+def test_profile_checker_cannot_disagree_with_declared_goals() -> None:
+    doc = {
+        "execution_profile": execution_profile_ref(),
+        "task_definition": definition(),
+    }
+    doc["checker"] = {
+        "checker": {"type": "TabletopZoneChecker", "goals": definition()["goals"]}
+    }
+    assert validate_task_document(doc) == ()
+    doc["checker"]["checker"]["goals"] = []
+    assert "execution_profile_checker" in [i.code for i in validate_task_document(doc)]
+    doc["task_definition"] = None
+    assert "definition_invalid" in [i.code for i in validate_task_document(doc)]

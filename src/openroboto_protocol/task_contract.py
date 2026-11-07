@@ -486,6 +486,18 @@ def validate_task_document(
             )
         )
     issues.extend(task_definition_issues(task.get("task_definition")))
+    if "checker" in task:
+        definition = task.get("task_definition")
+        goals = definition.get("goals") if isinstance(definition, Mapping) else None
+        expected_checker = {"checker": {"type": "TabletopZoneChecker", "goals": goals}}
+        if task["checker"] != expected_checker:
+            issues.append(
+                _issue(
+                    "execution_profile_checker",
+                    "checker",
+                    "Use the profile checker with exactly the declared goals.",
+                )
+            )
     try:
         parse_public_summary(
             task.get("public_summary"), expected_profile=task.get("execution_profile")
