@@ -382,6 +382,7 @@ def test_public_surface_is_pinned() -> None:
     assert set(task_contract.__all__) == {
         "ContractIssue",
         "TaskContractError",
+        "checker_types_for_profile",
         "execution_profile_ref",
         "parse_public_summary",
         "reference_contract_issues",
@@ -402,3 +403,15 @@ def test_profile_cannot_be_applied_to_another_source() -> None:
             }
         )
     ] == ["execution_profile_source"]
+
+
+def test_profile_checker_vocabulary_requires_the_exact_reference() -> None:
+    from openroboto_protocol.task_contract import checker_types_for_profile
+
+    assert checker_types_for_profile(execution_profile_ref()) == (
+        "TabletopZoneChecker",
+    )
+    assert checker_types_for_profile(None) == ()
+    ref = execution_profile_ref()
+    ref["digest"] = "0" * 64
+    assert checker_types_for_profile(ref) == ()

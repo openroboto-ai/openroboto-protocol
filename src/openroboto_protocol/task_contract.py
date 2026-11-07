@@ -19,6 +19,7 @@ from typing import Any
 __all__ = [
     "ContractIssue",
     "TaskContractError",
+    "checker_types_for_profile",
     "execution_profile_ref",
     "parse_public_summary",
     "reference_contract_issues",
@@ -120,6 +121,13 @@ def execution_profile_ref() -> dict[str, str]:
         "version": str(_PROFILE["version"]),
         "digest": _digest(_PROFILE),
     }
+
+
+def checker_types_for_profile(profile: object) -> tuple[str, ...]:
+    """Expose the wire checker vocabulary only for an exact supported reference."""
+    if not isinstance(profile, Mapping) or dict(profile) != execution_profile_ref():
+        return ()
+    return ("TabletopZoneChecker",)
 
 
 def task_profile_catalog() -> tuple[dict[str, Any], ...]:
