@@ -332,3 +332,11 @@ than a step everyone pays for.
 ## License
 
 MIT
+
+The cross-repository [Panda authoring sample](examples/panda-tabletop-definition.json)
+freezes the same profile and explicit public summary consumed by the CLI and
+worker. It is editable authoring input, not an admitted package or a claim of
+model discrimination. Build it and record/replay a reference using the separately
+installed task runtime. `checker_types_for_profile` exposes new checker names
+only for exact supported references; an explicit task checker must match its
+declared goals.

@@ -430,3 +430,17 @@ def test_profile_checker_cannot_disagree_with_declared_goals() -> None:
     assert "execution_profile_checker" in [i.code for i in validate_task_document(doc)]
     doc["task_definition"] = None
     assert "definition_invalid" in [i.code for i in validate_task_document(doc)]
+
+
+def test_cross_repository_authoring_sample_is_valid() -> None:
+    import json
+    from pathlib import Path
+
+    sample = json.loads(
+        (
+            Path(__file__).parent.parent / "examples" / "panda-tabletop-definition.json"
+        ).read_text()
+    )
+    assert sample["schema_version"] == 1
+    assert sample["execution_profile"] == execution_profile_ref()
+    assert validate_task_document(sample, require_profile=True) == ()

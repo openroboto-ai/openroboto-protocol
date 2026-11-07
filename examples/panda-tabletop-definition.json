@@ -1,0 +1,48 @@
+{
+  "execution_profile": {
+    "digest": "f72932959102b72b74812a7ef68339c0ea0116b0211499f1263de025f6821066",
+    "id": "panda-tabletop-v1",
+    "version": "1.0.0"
+  },
+  "public_summary": {
+    "capabilities": [
+      "single-arm manipulation"
+    ],
+    "execution_profile": {
+      "digest": "f72932959102b72b74812a7ef68339c0ea0116b0211499f1263de025f6821066",
+      "id": "panda-tabletop-v1",
+      "version": "1.0.0"
+    },
+    "instruction": "Move the orange cube into its marked zone, release it and leave it still.",
+    "origin": "original",
+    "robot": "franka-panda",
+    "title": "Move the orange cube"
+  },
+  "schema_version": 1,
+  "task_definition": {
+    "goals": [
+      {
+        "object_id": "cube_a",
+        "target_position": [
+          0.68,
+          -0.04,
+          0.782
+        ]
+      }
+    ],
+    "instance_count": 2,
+    "objects": [
+      {
+        "asset_id": "cube-60mm-v1",
+        "id": "cube_a",
+        "position": [
+          0.46,
+          -0.04,
+          0.782
+        ]
+      }
+    ],
+    "seed": 0,
+    "template": "place_in_zones"
+  }
+}
