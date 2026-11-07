@@ -136,7 +136,7 @@ def test_public_catalog_is_fresh_and_bound_to_a_complete_version() -> None:
     assert task_profile_catalog()[0]["assets"][0]["mass_kg"] == 0.08
     assert (
         execution_profile_ref()["digest"]
-        == "795445828f327f9b09355c3dd344fd266ecf1e0c798e0e9c74f216e4a68d6cd6"
+        == "f72932959102b72b74812a7ef68339c0ea0116b0211499f1263de025f6821066"
     )
 
 
@@ -389,3 +389,16 @@ def test_public_surface_is_pinned() -> None:
         "task_profile_catalog",
         "validate_task_document",
     }
+
+
+def test_profile_cannot_be_applied_to_another_source() -> None:
+    assert [
+        i.code
+        for i in validate_task_document(
+            {
+                "source": "robodojo",
+                "execution_profile": execution_profile_ref(),
+                "task_definition": definition(),
+            }
+        )
+    ] == ["execution_profile_source"]

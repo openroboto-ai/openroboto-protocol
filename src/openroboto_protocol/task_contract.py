@@ -41,7 +41,7 @@ _PROFILE = {
     ),
     "source": "axis",
     "scene_manifest_sha256": (
-        "55c16e182c022fff3277250299fd8b5791a8e63b67439bd4646f9f622b8a46b0"
+        "2e71806da0effe9069dfb1a615c81c11e3edcac5e4c26fdd921529816d638b26"
     ),
     "assets": [
         {
@@ -62,7 +62,11 @@ _PROFILE = {
         "minimum_center_separation_m": 0.08,
         "max_control_steps_per_trial": 500,
     },
-    "physics": {"gravity_m_s2": [0.0, 0.0, -9.81], "control_period_s": 0.2},
+    "physics": {
+        "mujoco_version": "3.17.0",
+        "gravity_m_s2": [0.0, 0.0, -9.81],
+        "control_period_s": 0.2,
+    },
     "success": {
         "xy_radius_m": 0.07,
         "z_tolerance_m": 0.01,
@@ -126,6 +130,14 @@ def task_profile_catalog() -> tuple[dict[str, Any], ...]:
     """
     profile = _copy(_PROFILE)
     profile["execution_profile"] = execution_profile_ref()
+    profile["authoring_commands"] = {
+        "create": "openroboto task create task-definition.json",
+        "build": (
+            "openroboto task build --definition task-definition.json --output ./my-task"
+        ),
+        "record_reference": "openroboto task record-reference ./my-task --example",
+        "self_test": "openroboto task self-test ./my-task",
+    }
     return (profile,)
 
 
@@ -446,6 +458,14 @@ def validate_task_document(
     if not active:
         return ()
     issues = _profile_issues(task.get("execution_profile"))
+    if "source" in task and task["source"] != "axis":
+        issues.append(
+            _issue(
+                "execution_profile_source",
+                "source",
+                "This profile requires source axis.",
+            )
+        )
     if (
         expected_execution_profile is not None
         and task.get("execution_profile") != expected_execution_profile
