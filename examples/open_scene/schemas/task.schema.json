@@ -1110,7 +1110,7 @@
       "$ref": "#/$defs/_ExactRef"
     },
     "instruction": {
-      "maxLength": 1000,
+      "maxLength": 16384,
       "minLength": 1,
       "pattern": "\\S",
       "title": "Instruction",

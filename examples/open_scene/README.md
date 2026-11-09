@@ -114,7 +114,7 @@ Resolution is the existing observation contract's 320x180 (state) or 1280x720
 (vision); the allowed sensor list remains exact and vision has no GT coordinates.
 MJCF wxyz conversion is explicit; all contract quaternions are xyzw.
 
-The current scene revision is `panda-open-scene-v1@2.0.0`, task schema 3 and
+The current scene revision is `panda-open-scene-v1@2.1.0`, task schema 3 and
 execution contract 3. The unpublished 0.16.0/schema-2 draft remains at commit
 `7c2063d` and its original evidence directory; it is not accepted by upgrading
 its version or digest in place. New required fields and semantics have a new
@@ -206,3 +206,20 @@ Run `uv run python scripts/export_scene_contract.py --output /tmp/scene-contract
 and compare its output with this directory (excluding this README). The exported
 JSON Schemas are wire-shape artifacts; normative Python validation also enforces
 the shared AST, cross-field references, no cycles and resource/permission binding.
+
+
+The unpublished protocol 0.18.0 candidate gives only `SceneTask.instruction` an
+independent 16384-Unicode-code-point limit. The profile's `instruction` capability
+binds the limit and counting unit into its digest. The 1000-character limits on
+other text fields, package byte limits, permissions and execution budgets are
+unchanged; there is no Unicode normalization or truncation.
+
+The old profile 2.0.0 / protocol 0.17.1 candidate remains reproducible at `2b3c043`;
+it was not formally deployed. These readers accept only the exact 2.1.0 reference,
+and old readers reject it. No old package, reference proof, receipt or result is
+upgraded in place. New content needs a new E/P/manifest/proof binding. Worker
+policy `scene-instruction-admission/2` and renderer `scene-program-text/1` are
+separate trusted runtime gates, not provided or waived by schema validation.
+Their exact content must enter configuration and runtime/environment identities.
+The historical 1000-character policy 1 is retained. Text longer than the new
+limit remains unsupported; it cannot be truncated or replaced by a summary/hash.

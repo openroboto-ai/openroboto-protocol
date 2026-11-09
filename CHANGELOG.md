@@ -20,6 +20,27 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.18.0 — 2026-11-10 (unpublished candidate)
+
+Adds an independent 16384-Unicode-code-point limit for `SceneTask.instruction`.
+The shared 1000-character `_Text` limit is unchanged. The exported
+`MAX_SCENE_INSTRUCTION_CHARACTERS` constant and profile `instruction` capability
+share one limit. No normalization, truncation or extra runtime dependency/I/O.
+
+Select `panda-open-scene-v1@2.1.0` with its new digest explicitly; task schema 3
+and execution contract 3 keep their shapes. New readers reject scene 2.0.0 and
+old readers reject 2.1.0. The undeployed 0.17.1 / 2.0.0 checkpoint at `2b3c043`
+and its distributions/evidence are retained, without in-place package/proof/result
+migration. This changed development-profile output is deliberate under the 0.x
+version policy. Released v1/controlled-v2 functions and golden vectors are unchanged.
+
+Robot/assets/physics, roles, package digests, tools/permissions, resource tiers and
+agent budgets retain their rules. The linear frame ancestry check is retained.
+This capacity does not implement or waive instruction consistency. Worker policy
+`scene-instruction-admission/2` still requires the unchanged `scene-program-text/1`
+renderer and all other checks bound into a new trusted config/runtime/environment.
+The old 1000-character policy 1 remains historical. No publication is authorized.
+
 ## 0.17.1 — 2026-11-09 (unpublished candidate)
 
 Consumers rebuilding the scene candidate must use this patch's exact wheel;

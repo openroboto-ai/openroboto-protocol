@@ -23,6 +23,7 @@ from .task_contract import ContractIssue, TaskContractError
 
 __all__ = [
     "DISTRIBUTION_POLICY",
+    "MAX_SCENE_INSTRUCTION_CHARACTERS",
     "CapabilityResponse",
     "CapabilityStatus",
     "SubmissionIdentity",
@@ -35,6 +36,10 @@ __all__ = [
     "task_profile_catalog",
     "validate_task_document",
 ]
+
+# The scene instruction counts Unicode code points, not encoded bytes or
+# grapheme clusters. It grants no renderer, model budget or admission exemption.
+MAX_SCENE_INSTRUCTION_CHARACTERS = 16_384
 
 # A capability response never substitutes for physical admission or rewards.
 CapabilityStatus = Literal[
@@ -57,7 +62,7 @@ def _profile() -> dict[str, Any]:
     base = composed_catalog()
     return {
         "id": "panda-open-scene-v1",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "development_candidate",
         "task_schema_version": 3,
         "execution_contract_version": 3,
@@ -69,6 +74,10 @@ def _profile() -> dict[str, Any]:
         "success": base["success"],
         "physics": base["physics"],
         "observations": base["observations"],
+        "instruction": {
+            "max_characters": MAX_SCENE_INSTRUCTION_CHARACTERS,
+            "length_unit": "unicode_code_points",
+        },
         "resources": base["resources"],
         "coordinates": "right_handed_z_up_metres_radians_xyzw",
         "dependency_resolution": "materialized_package_relative_only",

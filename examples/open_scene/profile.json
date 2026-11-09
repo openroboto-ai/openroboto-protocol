@@ -16,15 +16,19 @@
   "dependency_resolution": "materialized_package_relative_only",
   "execution_contract_version": 3,
   "execution_profile": {
-    "digest": "052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5",
+    "digest": "9badf61d742ed5787e7af4ad19adc90b616147ee4c62159915bddeff53f9a1a2",
     "id": "panda-open-scene-v1",
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "geom_ownership": "explicit_disjoint_no_descendant_expansion",
   "id": "panda-open-scene-v1",
   "identity_version": 1,
   "initial_reset": "free_pose_then_scalar_joints_then_assert_all_body_poses",
   "initial_velocities": "zero",
+  "instruction": {
+    "length_unit": "unicode_code_points",
+    "max_characters": 16384
+  },
   "observations": {
     "state": [
       "image",
@@ -93,7 +97,7 @@
     "support_min_weight_fraction": 0.5
   },
   "task_schema_version": 3,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "zone_capacity": "matching_assignment_only",
   "zone_frame": "world_xy"
 }
