@@ -20,6 +20,21 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.17.1 — 2026-11-09 (unpublished candidate)
+
+Consumers rebuilding the scene candidate must use this patch's exact wheel;
+0.17.0 remains reproducible at commit `aea37aa`. The task schema, execution
+contract, profile digest, accepted inputs, validation errors and exported JSON
+Schemas are unchanged. Consumer pin/lock updates remain the integration owner's
+responsibility; this candidate is not published.
+
+Fixes quadratic frame ancestry validation with an iterative path walk and a
+cache of validated ancestors. Every parent edge is traversed at most once;
+long chains and shared subtrees now take O(V + E) work. No frame-count limit,
+new dependency, I/O or historical vector changes. Regression tests count parent
+accesses independently of timing and cover long chains, cycles, missing parents,
+shared ancestors and world-rooted branches in both insertion orders.
+
 ## 0.17.0 — 2026-11-09 (unpublished candidate)
 
 Existing released v1 and controlled v2 consumers keep identical outputs. Imported
