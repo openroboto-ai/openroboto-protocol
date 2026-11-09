@@ -60,6 +60,7 @@ copy-paste away from happening.
 | `package_digest.py` | Task-package file list and content digest | Miner CLI, admission worker and evaluation layer must compute the same number |
 | `task_contract.py` | Versioned authoring options, explicit public synopsis and reference limits | Authors, backend and workers reject the same unsupported data |
 | `task_profiles.py` | Exact profile dispatch, with development profiles excluded by default | CLI, backend and workers |
+| `composed_execution.py` | Exact v2 reference/agent execution contract normalization, shared by backend and worker | Registration, reference proofs and actual execution |
 | `tabletop_assets.py`, `tabletop_v2.py` | Deterministic geometry, physical asset digests, composed predicates and explicit observation/resource contracts | Candidate authoring tools and physical admission |
 | `model_hash.py` | Model fingerprinting | Both compute it; a mismatch rejects a submission |
 | `model_format.py` | What a submittable checkpoint must contain | Miners export to it, the evaluator rejects against it |

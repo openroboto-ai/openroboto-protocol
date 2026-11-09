@@ -28,7 +28,9 @@ functions and their profile digest are unchanged. New consumers must opt into
 
 Adds a zero-I/O controlled geometric catalog and strict composed-task validation:
 true per-shape geometry/symmetry, contact physics, dependent stages, invariants,
-matching and explicit state/vision/resource contracts. Candidate guards do not
+matching and explicit state/vision/resource contracts. `composed_execution`
+normalizes version-2 execution conditions identically for the backend and worker;
+legacy version-1 parsers and golden digests remain unchanged. Candidate guards do not
 declare validated support or grant execution budgets. CLI, runtime and backend
 must install the same 0.15.0 candidate wheel for local integration; publish and
 regenerate consumer index lockfiles only after release approval.
