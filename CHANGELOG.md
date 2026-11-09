@@ -20,6 +20,24 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.17.0 — 2026-11-09 (unpublished candidate)
+
+Existing released v1 and controlled v2 consumers keep identical outputs. Imported
+scene consumers must choose task schema 3 and `panda-open-scene-v1@2.0.0` with its
+new exact digest; the initial unpublished schema-2 draft at commit `7c2063d`
+remains reproducible and is not silently upgraded.
+
+Completes scene bindings for compound visual/collision parts and transforms,
+independent physics/provenance/symmetry digests, exact geom ownership and support
+target subsets, passive scalar joint parent/axis/range/unit, free versus fixed
+reset semantics, world/body/asset frames and calibrated render-camera identity.
+Scene actuators are forbidden and Panda retains its existing nine-dimensional
+action mapping. Adds only the optional `contact_targets` argument to the shared
+program validator; existing v2 code/path/message/order and profile digest remain
+identical. Consumers still need actual compiled-model verification, per-env
+resolvers, isolation, server attestation and approved publication. No runtime
+dependency, I/O, released-function or historical golden-vector changes.
+
 ## 0.16.0 — 2026-11-09 (unpublished candidate)
 
 Existing v1/v2 consumers require no migration: released function outputs, package

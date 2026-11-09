@@ -5,7 +5,7 @@ miners, the evaluation worker, and the web frontend. Bittensor **netuid 80**.
 
 ## Install
 
-This checkout is the **unpublished 0.16.0 candidate**. For local integration,
+This checkout is the **unpublished 0.17.0 candidate**. For local integration,
 build with `uv build --wheel` and install that exact wheel. The index commands
 below apply after the approved release exists; they are not a claim that the
 candidate is already on PyPI.
@@ -14,9 +14,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.16.0"
+uv add "openroboto-protocol==0.17.0"
 # or
-pip install "openroboto-protocol==0.16.0"
+pip install "openroboto-protocol==0.17.0"
 ```
 
 ```python
@@ -37,7 +37,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.16.0"   # API and imported-scene schema consumers
+uv add "openroboto-protocol[schemas]==0.17.0"   # API and imported-scene schema consumers
 ```
 
 ## Why this package exists
@@ -117,7 +117,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.16.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.17.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
@@ -369,7 +369,7 @@ declared goals.
 
 ## Imported scenes: explicit development contract (OPE-229)
 
-The unpublished 0.16.0 candidate adds `scene_contract` and `scene_schema`.
+The unpublished 0.17.0 candidate adds `scene_contract` and `scene_schema`.
 Install the existing `[schemas]` extra to parse imported scenes. Legacy imports,
 `task_contract`, `task_profiles` defaults, directory hashing, and v1/v2 profile
 identities keep their outputs. No unconditional dependency or package I/O is added.
@@ -378,7 +378,7 @@ identities keep their outputs. No unconditional dependency or package I/O is add
 | --- | --- | --- | --- |
 | Existing v1 | 1 | Existing consumer v1 parser | Exact `panda-tabletop-v1` |
 | Controlled OPE-227 candidate | 1 | `composed_execution`, version 2 | Exact `panda-tabletop-v2` |
-| Imported scene candidate | 2 | `scene_contract`, version 3 | Exact `panda-open-scene-v1` |
+| Imported scene candidate | 3 | `scene_contract`, version 3 | Exact `panda-open-scene-v1` |
 
 Consumers of the new path explicitly use
 `scene_contract.validate_task_document` and `scene_schema.SceneTask`; old entrypoints
@@ -411,3 +411,15 @@ checking actual XML/geometry/robot identity, isolation, authenticated receipts,
 consumer version pins/locks, remote worker attestation and public release remain
 OPE-230–OPE-238 integration gates. Existing consumers must not silently upgrade a
 v1 task or copy new identities into old results.
+
+
+The 0.17.0 candidate replaces the initial unpublished 0.16.0 scene draft with
+`panda-open-scene-v1@2.0.0`, task schema 3 and execution contract 3. The initial
+schema-2 draft remains reproducible at commit `7c2063d`; it is not silently
+upgraded. The new binding includes compound visual/collision geometry, separate
+physics/provenance/symmetry digests, explicit frames and geom ownership, passive
+joint axis/range/unit, exact support-target subsets and camera calibration.
+Controlled v2 remains unchanged; `validate_program` only gains an optional
+`contact_targets` set for the scene adapter, with identical findings for existing
+callers. Scene actuators are forbidden; only the existing nine-dimensional Panda
+control mapping is allowed. See the fixture README for the complete mapping.

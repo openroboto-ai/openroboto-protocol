@@ -111,34 +111,230 @@ class _Robot(_Closed):
     mount: _Pose
 
 
+class _Digested(_Closed):
+    """Identity of the complete typed descriptor excluding only its own digest."""
+
+    digest: _Digest
+
+    @model_validator(mode="after")
+    def content_identity(self) -> Self:
+        if self.digest != canonical_digest(
+            self.model_dump(mode="json", exclude={"digest"})
+        ):
+            raise ValueError("Descriptor digest does not match its canonical content")
+        return self
+
+
+class _GeometryPart(_Closed):
+    """Actual shapes in asset coordinates; sizes follow MuJoCo conventions.
+
+    Box: half-extents. Sphere: radius. Cylinder/capsule: radius and straight
+    half-length (excluding cap radius). Mesh: XYZ scale, plus materialized path.
+    """
+
+    id: _Id
+    kind: Literal["box", "sphere", "cylinder", "capsule", "mesh"]
+    size: Annotated[list[float], Field(min_length=1, max_length=3)]
+    mesh_path: _Path | None
+    pose_in_asset: _Pose
+
+    @model_validator(mode="after")
+    def shape_parameters(self) -> Self:
+        dimensions = {"box": 3, "sphere": 1, "cylinder": 2, "capsule": 2, "mesh": 3}
+        if (
+            len(self.size) != dimensions[self.kind]
+            or any(v <= 0 for v in self.size)
+            or (self.kind == "mesh") != (self.mesh_path is not None)
+        ):
+            raise ValueError(
+                "Use exact positive shape dimensions or mesh XYZ scale and path"
+            )
+        return self
+
+
+class _Geometry(_Digested):
+    parts: Annotated[list[_GeometryPart], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def unique_parts(self) -> Self:
+        if len({p.id for p in self.parts}) != len(self.parts):
+            raise ValueError("Geometry part ids must be unique within their asset")
+        return self
+
+
+class _ContactPhysics(_Closed):
+    friction: Annotated[list[float], Field(min_length=3, max_length=3)]
+    contact_dimension: Annotated[int, Field(ge=1, le=6)]
+
+    @model_validator(mode="after")
+    def nonnegative_friction(self) -> Self:
+        if self.contact_dimension not in {1, 3, 4, 6} or any(
+            v < 0 for v in self.friction
+        ):
+            raise ValueError(
+                "Use nonnegative friction and contact dimension 1, 3, 4 or 6"
+            )
+        return self
+
+
+class _Physics(_Digested):
+    """Mass/COM/full inertia in asset frame; contact properties per collision part."""
+
+    mass_kg: Annotated[float, Field(ge=0)]
+    center_of_mass_m: _Vector
+    # Tensor order is Ixx, Iyy, Izz, Ixy, Ixz, Iyz about COM in asset axes.
+    inertia_kg_m2: Annotated[list[float], Field(min_length=6, max_length=6)]
+    contacts: dict[_Id, _ContactPhysics]
+
+
+class _Symmetry(_Digested):
+    """Explicit proper rotation group or continuous axis, verified against geometry."""
+
+    category: Literal[
+        "none", "isotropic", "axial_unsigned", "box", "polygon64", "prism"
+    ]
+    rotations_xyzw: list[_Quaternion]
+    axis_xyz: _Vector | None
+
+    @model_validator(mode="after")
+    def representation(self) -> Self:
+        if self.category == "axial_unsigned":
+            if (
+                self.axis_xyz is None
+                or abs(sum(v * v for v in self.axis_xyz) - 1) > 1e-8
+            ):
+                raise ValueError("Axial symmetry requires a unit asset-frame axis")
+        elif self.axis_xyz is not None:
+            raise ValueError("Only axial symmetry declares an axis")
+        if self.category in {"isotropic", "axial_unsigned"}:
+            if self.rotations_xyzw:
+                raise ValueError(
+                    "Continuous symmetry does not enumerate finite rotations"
+                )
+        elif not self.rotations_xyzw or len(
+            {tuple(q) for q in self.rotations_xyzw}
+        ) != len(self.rotations_xyzw):
+            raise ValueError("Finite symmetry requires unique explicit rotations")
+        if self.category == "none" and self.rotations_xyzw != [[0.0, 0.0, 0.0, 1.0]]:
+            raise ValueError("Asymmetric geometry has only the identity rotation")
+        return self
+
+
+class _Provenance(_Digested):
+    source: _Text
+    source_revision: Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
+    license: _Text
+
+
+class _Asset(_Digested):
+    """Compound asset identity includes geometry, physics, symmetry and provenance."""
+
+    id: _Id
+    version: _Text
+    visual: _Geometry
+    collision: _Geometry
+    physics: _Physics
+    symmetry: _Symmetry
+    provenance: _Provenance
+
+    @model_validator(mode="after")
+    def collision_physics(self) -> Self:
+        if set(self.physics.contacts) != {p.id for p in self.collision.parts}:
+            raise ValueError(
+                "Contact physics must cover every collision part exactly once"
+            )
+        return self
+
+
+class _Frame(_Closed):
+    """Reset-reference child origin/axes in its parent; world is implicit identity."""
+
+    id: _Id
+    parent: _Id
+    pose_in_parent: _Pose
+
+
 class _Joint(_Closed):
-    """Bind one scalar hinge/slide to a declared body's imported MuJoCo joint."""
+    """Passive scalar joint identity, checked against the actual compiled model."""
 
     id: _Id
     name: _Text
     body_id: _Id
+    parent_body: _Text
     kind: Literal["hinge", "slide"]
+    axis_in_child_body: _Vector
+    range: Annotated[list[float], Field(min_length=2, max_length=2)]
+    unit: Literal["rad", "m"]
+
+    @model_validator(mode="after")
+    def axis_range_and_unit(self) -> Self:
+        if (
+            abs(sum(v * v for v in self.axis_in_child_body) - 1) > 1e-8
+            or self.range[0] >= self.range[1]
+            or self.unit != ("rad" if self.kind == "hinge" else "m")
+        ):
+            raise ValueError(
+                "Use a unit joint axis, increasing range and matching rad/m unit"
+            )
+        return self
 
 
 class _Object(_Closed):
-    """Logical checker identity bound to actual geometry, never a proxy cube."""
+    """Explicit geometry ownership on one real body; descendants are never implicit."""
 
     id: _Id
     body: _Text
-    asset_id: _Path
-    symmetry: Literal[
-        "none", "isotropic", "axial_unsigned", "box", "polygon64", "prism"
+    asset: _ExactRef
+    body_frame: _Id
+    asset_pose_in_body: _Pose
+    collision_geoms: dict[_Id, _Text]
+    motion: Literal["fixed", "free", "articulated"]
+    free_joint_name: _Text | None
+
+    @model_validator(mode="after")
+    def reset_binding(self) -> Self:
+        if (self.motion == "free") != (self.free_joint_name is not None):
+            raise ValueError("Only free bodies declare a free-joint reset target")
+        return self
+
+
+class _PlatformGroup(_Closed):
+    """Exact trusted platform geom groups, never author-overridable target aliases."""
+
+    id: Literal["table", "robot"]
+    body: _Text
+    collision_geoms: Annotated[list[_Text], Field(min_length=1)]
+
+
+class _ContactTarget(_Closed):
+    """Named subset of an entity's geoms; aliases may overlap, ownership may not."""
+
+    id: _Id
+    entity_id: _Id
+    geom_names: Annotated[list[_Text], Field(min_length=1)]
+
+
+class _Camera(_Digested):
+    """Exact render camera and calibration; no state coordinates in vision mode."""
+
+    name: _Text
+    frame: _Id
+    pose_in_frame: _Pose
+    vertical_fov_deg: Annotated[float, Field(gt=0, lt=180)]
+    image_size: Annotated[
+        list[Annotated[int, Field(gt=0)]], Field(min_length=2, max_length=2)
     ]
 
 
 class _Zone(_Closed):
-    """Reuse the composed circular XY zone, capacity and asset acceptance rules."""
+    """World-XY circular zones; capacity is matching assignment, not occupancy."""
 
     id: _Id
+    frame: Literal["world"]
     position: Annotated[list[float], Field(min_length=2, max_length=2)]
     radius_m: Annotated[float, Field(ge=0.025, le=0.20)]
     capacity: Annotated[int, Field(ge=1)]
-    accepts: Annotated[list[_Path], Field(min_length=1)]
+    accepts: Annotated[list[_ExactRef], Field(min_length=1)]
 
 
 class _ObjectState(_Closed):
@@ -165,6 +361,11 @@ class _Scene(_Closed):
     entrypoint: _Path
     dependencies: Annotated[list[_Dependency], Field(min_length=1)]
     joints: list[_Joint]
+    assets: Annotated[list[_Asset], Field(min_length=1)]
+    frames: Annotated[list[_Frame], Field(min_length=1)]
+    platform_groups: list[_PlatformGroup]
+    contact_targets: list[_ContactTarget]
+    camera: _Camera
     initial_states: Annotated[list[_InitialState], Field(min_length=1)]
     units: Literal["metres_radians"]
     coordinates: Literal["right_handed_z_up_xyzw"]
@@ -228,14 +429,14 @@ class _Definition(_Closed):
 
 
 class SceneTask(_Closed):
-    """Version-2 task.json for the explicit imported-scene path only.
+    """Version-3 task.json for the explicit imported-scene path only.
 
     v1 task.json is parsed by the existing task_contract entrypoint. An unknown
     profile, extra field, sensor widening or checker substitution fails closed.
     Public summaries are authored separately, never extracted from private text.
     """
 
-    schema_version: Annotated[int, Field(ge=2, le=2)]
+    schema_version: Annotated[int, Field(ge=3, le=3)]
     source: Literal["axis"]
     task_id: _Id
     instruction: _Text
@@ -298,27 +499,32 @@ class SceneTask(_Closed):
             )
             or len({o.body for o in objects.values()}) != len(objects)
             or len({j.name for j in joints.values()}) != len(joints)
+            or len({o.body_frame for o in objects.values()}) != len(objects)
         ):
             raise ValueError("Use unique, non-reserved logical and physical bindings")
         files = {d.path: d for d in self.scene.dependencies}
-        if any(o.asset_id not in files for o in objects.values()) or any(
-            j.body_id not in objects for j in joints.values()
-        ):
-            raise ValueError("Objects and joints must bind declared scene resources")
+        self.scene_bindings(objects, joints, conditions)
+        assets = {a.id: a for a in self.scene.assets}
         for zone in zones.values():
             if (
                 zone.capacity > budget["max_objects"]
-                or len(set(zone.accepts)) != len(zone.accepts)
+                or len({r.id for r in zone.accepts}) != len(zone.accepts)
                 or any(
-                    a not in {o.asset_id for o in objects.values()}
-                    for a in zone.accepts
+                    r.id not in {o.asset.id for o in objects.values()}
+                    or r.model_dump()
+                    != {
+                        "id": assets[r.id].id,
+                        "version": assets[r.id].version,
+                        "digest": assets[r.id].digest,
+                    }
+                    for r in zone.accepts
                 )
             ):
                 raise ValueError(
                     "Zone capacity and accepts must match declared object assets"
                 )
         if (
-            len(objects) > budget["max_objects"]
+            sum(o.motion != "fixed" for o in objects.values()) > budget["max_objects"]
             or len(zones) > 32
             or (definition.observation == "vision" and len(zones) > 16)
             or len(self.scene.initial_states) > budget["max_instances"]
@@ -339,10 +545,22 @@ class SceneTask(_Closed):
                     "Each initial state must cover every object and scalar joint "
                     "exactly once"
                 )
+            if any(
+                not joints[j.joint_id].range[0]
+                <= j.position
+                <= joints[j.joint_id].range[1]
+                for j in state.joints
+            ):
+                raise ValueError(
+                    "Initial scalar joint positions must be within declared ranges"
+                )
         issues = validate_program(
             [s.model_dump(mode="json") for s in definition.stages],
             definition.invariants,
-            object_symmetries={k: o.symmetry for k, o in objects.items()},
+            object_symmetries={
+                k: assets[o.asset.id].symmetry.category for k, o in objects.items()
+            },
+            contact_targets={t.id for t in self.scene.contact_targets},
             zone_ids=set(zones),
             max_stages=budget["max_stages"],
             max_hold_ticks=budget["max_control_steps_per_trial"] * 100,
@@ -350,6 +568,124 @@ class SceneTask(_Closed):
         if issues:
             raise TaskContractError(issues)
         return self
+
+    def scene_bindings(
+        self,
+        objects: Mapping[str, _Object],
+        joints: Mapping[str, _Joint],
+        conditions: Mapping[str, Any],
+    ) -> None:
+        """Cross-bind descriptors; the importer still verifies compiled physics."""
+        assets = {a.id: a for a in self.scene.assets}
+        frames = {f.id: f for f in self.scene.frames}
+        if (
+            len(assets) != len(self.scene.assets)
+            or len(frames) != len(self.scene.frames)
+            or "world" in frames
+            or "scene" not in frames
+            or frames["scene"].parent != "world"
+        ):
+            raise ValueError(
+                "Declare unique assets/frames with scene and implicit world"
+            )
+        for frame in frames.values():
+            seen = {frame.id}
+            parent = frame.parent
+            while parent != "world":
+                if parent not in frames or parent in seen:
+                    raise ValueError("Frames must form a tree rooted at world")
+                seen.add(parent)
+                parent = frames[parent].parent
+        files = {d.path for d in self.scene.dependencies}
+        for asset in assets.values():
+            if any(
+                p.mesh_path is not None and p.mesh_path not in files
+                for geometry in (asset.visual, asset.collision)
+                for p in geometry.parts
+            ):
+                raise ValueError("Mesh parts must bind materialized dependencies")
+        owned_geoms: list[str] = []
+        for obj in objects.values():
+            bound_asset = assets.get(obj.asset.id)
+            if bound_asset is None or obj.asset.model_dump() != {
+                "id": bound_asset.id,
+                "version": bound_asset.version,
+                "digest": bound_asset.digest,
+            }:
+                raise ValueError(
+                    "Every entity requires an exact declared compound asset"
+                )
+            if obj.body_frame not in frames or set(obj.collision_geoms) != {
+                p.id for p in bound_asset.collision.parts
+            }:
+                raise ValueError(
+                    "Bind the body frame and every collision part to an actual geom"
+                )
+            if obj.motion != "fixed" and (
+                bound_asset.physics.mass_kg <= 0
+                or any(v <= 0 for v in bound_asset.physics.inertia_kg_m2[:3])
+            ):
+                raise ValueError(
+                    "Moving bodies require positive mass and diagonal inertia"
+                )
+            owned_geoms.extend(obj.collision_geoms.values())
+        groups = {g.id: g for g in self.scene.platform_groups}
+        if set(groups) != {"table", "robot"} or len(groups) != len(
+            self.scene.platform_groups
+        ):
+            raise ValueError(
+                "Bind both trusted table and robot geometry groups exactly once"
+            )
+        for group in groups.values():
+            owned_geoms.extend(group.collision_geoms)
+        if len(set(owned_geoms)) != len(owned_geoms):
+            raise ValueError(
+                "Each collision geom has exactly one entity/platform owner"
+            )
+        targets = {t.id: t for t in self.scene.contact_targets}
+        if len(targets) != len(self.scene.contact_targets) or targets.keys() & (
+            objects.keys() | {"table", "robot", "franka"}
+        ):
+            raise ValueError(
+                "Contact target ids must be unique and distinct from owners"
+            )
+        for target in targets.values():
+            owner = objects.get(target.entity_id)
+            if (
+                owner is None
+                or len(set(target.geom_names)) != len(target.geom_names)
+                or not set(target.geom_names) <= set(owner.collision_geoms.values())
+            ):
+                raise ValueError(
+                    "Contact targets must name explicit geom subsets of their entity"
+                )
+        free_names = [
+            o.free_joint_name for o in objects.values() if o.free_joint_name is not None
+        ]
+        if len(set(free_names)) != len(free_names) or set(free_names) & {
+            j.name for j in joints.values()
+        }:
+            raise ValueError("Free and scalar joint names must be disjoint and unique")
+        for joint in joints.values():
+            child = objects.get(joint.body_id)
+            if (
+                child is None
+                or child.motion != "articulated"
+                or joint.parent_body == child.body
+            ):
+                raise ValueError(
+                    "Bind scalar joints to an articulated child and distinct parent"
+                )
+        if (
+            self.scene.camera.frame not in {"world", *frames}
+            or self.scene.camera.image_size
+            != scene_contract.profile_catalog()["camera_sizes"][
+                conditions["observation_contract"]
+            ]
+        ):
+            raise ValueError(
+                "Camera frame and resolution must match the exact observation contract"
+            )
 
 
 def dependency_issues(

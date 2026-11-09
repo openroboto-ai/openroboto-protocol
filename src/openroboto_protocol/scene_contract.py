@@ -57,9 +57,9 @@ def _profile() -> dict[str, Any]:
     base = composed_catalog()
     return {
         "id": "panda-open-scene-v1",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "status": "development_candidate",
-        "task_schema_version": 2,
+        "task_schema_version": 3,
         "execution_contract_version": 3,
         "robot": "franka-panda",
         "simulator": "mujoco/3.17.0",
@@ -73,6 +73,17 @@ def _profile() -> dict[str, Any]:
         "coordinates": "right_handed_z_up_metres_radians_xyzw",
         "dependency_resolution": "materialized_package_relative_only",
         "identity_version": 1,
+        "binding_version": 2,
+        "action_dimensions": 9,
+        "scene_actuators": "forbidden",
+        "geom_ownership": "explicit_disjoint_no_descendant_expansion",
+        "contact_targets": "explicit_owner_subsets_overlap_permitted",
+        "poses": "body_origin_world_not_geometry_or_com",
+        "initial_reset": "free_pose_then_scalar_joints_then_assert_all_body_poses",
+        "initial_velocities": "zero",
+        "zone_frame": "world_xy",
+        "zone_capacity": "matching_assignment_only",
+        "camera_sizes": base["camera"]["image_size"],
     }
 
 
@@ -170,7 +181,7 @@ def validate_task_document(
 ) -> tuple[ContractIssue, ...]:
     """New callers dispatch explicitly; legacy entrypoints remain untouched."""
     ref = task.get("execution_profile")
-    if task.get("schema_version") != 2 and not (
+    if task.get("schema_version") not in (2, 3) and not (
         isinstance(ref, Mapping) and ref.get("id") == profile_ref()["id"]
     ):
         return task_profiles.validate_task_document(

@@ -5,10 +5,33 @@
         "invariants": [],
         "objects": [
           {
-            "asset_id": "assets/part.obj",
+            "asset": {
+              "digest": "5d07dc7004ef4ed96d5d3fc5db6a0f0f6103360c526f1b343ae36c1ccafa960c",
+              "id": "door_compound",
+              "version": "fixture-2"
+            },
+            "asset_pose_in_body": {
+              "position_m": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            },
             "body": "door",
+            "body_frame": "door_frame",
+            "collision_geoms": {
+              "handle": "door_handle",
+              "panel": "door_panel"
+            },
+            "free_joint_name": null,
             "id": "door",
-            "symmetry": "none"
+            "motion": "articulated"
           }
         ],
         "observation": "vision",
@@ -55,9 +78,9 @@
       "wall_seconds": 60.0
     },
     "execution_profile": {
-      "digest": "ecc1b4464b67f99f9939bde454451f7dfd0011bd3ac28bb0bacad8c9969af666",
+      "digest": "052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5",
       "id": "panda-open-scene-v1",
-      "version": "1.0.0"
+      "version": "2.0.0"
     },
     "harness": {
       "name": "headless"
@@ -80,16 +103,16 @@
     "version": 3
   },
   "execution_profile": {
-    "digest": "ecc1b4464b67f99f9939bde454451f7dfd0011bd3ac28bb0bacad8c9969af666",
+    "digest": "052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5",
     "id": "panda-open-scene-v1",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
   "instruction": "Interface example only; this is not a physical task or a reference success.",
   "public_summary": {
     "execution_profile": {
-      "digest": "ecc1b4464b67f99f9939bde454451f7dfd0011bd3ac28bb0bacad8c9969af666",
+      "digest": "052ede59310a10eecdaefb43584f06340bc3ad461dbca8579cdb23b8ec4ad3d5",
       "id": "panda-open-scene-v1",
-      "version": "1.0.0"
+      "version": "2.0.0"
     },
     "instruction": "Schema and identity example only.",
     "origin": "original",
@@ -122,6 +145,199 @@
     }
   },
   "scene": {
+    "assets": [
+      {
+        "collision": {
+          "digest": "3e6567bf4c96f873726edc48a34c292d244d156d81a753b744876b508010933e",
+          "parts": [
+            {
+              "id": "panel",
+              "kind": "mesh",
+              "mesh_path": "assets/part.obj",
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "id": "handle",
+              "kind": "capsule",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.03,
+                  0.0,
+                  0.02
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.006,
+                0.02
+              ]
+            }
+          ]
+        },
+        "digest": "5d07dc7004ef4ed96d5d3fc5db6a0f0f6103360c526f1b343ae36c1ccafa960c",
+        "id": "door_compound",
+        "physics": {
+          "center_of_mass_m": [
+            0.0,
+            0.0,
+            0.02
+          ],
+          "contacts": {
+            "handle": {
+              "contact_dimension": 6,
+              "friction": [
+                0.8,
+                0.01,
+                0.001
+              ]
+            },
+            "panel": {
+              "contact_dimension": 6,
+              "friction": [
+                0.8,
+                0.01,
+                0.001
+              ]
+            }
+          },
+          "digest": "feaedf538c94e3f6aa7f88791fe5806b24ece04ad1994749d7ff74e3b47bca1f",
+          "inertia_kg_m2": [
+            0.001,
+            0.001,
+            0.001,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "mass_kg": 1.0
+        },
+        "provenance": {
+          "digest": "c74e30c1808f0e96a709d980eb35b8fbf2785d5c384e4d136265ec25e1807936",
+          "license": "MIT",
+          "source": "fixture://ope229/synthetic",
+          "source_revision": "b604285829ba70f6475d3650f1e2aa728551af327578e4f3fee38ee78281be21"
+        },
+        "symmetry": {
+          "axis_xyz": null,
+          "category": "none",
+          "digest": "60c05d822fdeea600a38ccb5d661687ba4c15e4c1396226fb9b70032214bd8fa",
+          "rotations_xyzw": [
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        },
+        "version": "fixture-2",
+        "visual": {
+          "digest": "3e6567bf4c96f873726edc48a34c292d244d156d81a753b744876b508010933e",
+          "parts": [
+            {
+              "id": "panel",
+              "kind": "mesh",
+              "mesh_path": "assets/part.obj",
+              "pose_in_asset": {
+                "position_m": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "id": "handle",
+              "kind": "capsule",
+              "mesh_path": null,
+              "pose_in_asset": {
+                "position_m": [
+                  0.03,
+                  0.0,
+                  0.02
+                ],
+                "quaternion_xyzw": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "size": [
+                0.006,
+                0.02
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "camera": {
+      "digest": "d5eac26453cf6249f5d1a0698fde0974b2dbdac7fb75e75e2f3af986cb710493",
+      "frame": "world",
+      "image_size": [
+        1280,
+        720
+      ],
+      "name": "camera0",
+      "pose_in_frame": {
+        "position_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "vertical_fov_deg": 47.0
+    },
+    "contact_targets": [
+      {
+        "entity_id": "door",
+        "geom_names": [
+          "door_handle"
+        ],
+        "id": "handle_surface"
+      }
+    ],
     "coordinates": "right_handed_z_up_xyzw",
     "dependencies": [
       {
@@ -130,10 +346,10 @@
         "requires": [
           "assets/missing.obj"
         ],
-        "sha256": "7b9ce7f2a7222b770bd4ee98b37bfa33403ec0b9f641852b375ae05831e20473",
-        "size_bytes": 197,
+        "sha256": "b604285829ba70f6475d3650f1e2aa728551af327578e4f3fee38ee78281be21",
+        "size_bytes": 314,
         "source": "fixture://ope229/synthetic",
-        "source_revision": "7b9ce7f2a7222b770bd4ee98b37bfa33403ec0b9f641852b375ae05831e20473"
+        "source_revision": "b604285829ba70f6475d3650f1e2aa728551af327578e4f3fee38ee78281be21"
       },
       {
         "license": "MIT",
@@ -146,6 +362,42 @@
       }
     ],
     "entrypoint": "scene.xml",
+    "frames": [
+      {
+        "id": "scene",
+        "parent": "world",
+        "pose_in_parent": {
+          "position_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": "door_frame",
+        "parent": "scene",
+        "pose_in_parent": {
+          "position_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        }
+      }
+    ],
     "initial_states": [
       {
         "id": "first",
@@ -177,24 +429,74 @@
     ],
     "joints": [
       {
+        "axis_in_child_body": [
+          0.0,
+          0.0,
+          1.0
+        ],
         "body_id": "door",
         "id": "door_hinge",
         "kind": "hinge",
-        "name": "hinge"
+        "name": "hinge",
+        "parent_body": "world",
+        "range": [
+          0.0,
+          1.5707963267948966
+        ],
+        "unit": "rad"
+      }
+    ],
+    "platform_groups": [
+      {
+        "body": "table",
+        "collision_geoms": [
+          "table_surface"
+        ],
+        "id": "table"
+      },
+      {
+        "body": "franka",
+        "collision_geoms": [
+          "franka/fixture_geom"
+        ],
+        "id": "robot"
       }
     ],
     "units": "metres_radians"
   },
-  "schema_version": 2,
+  "schema_version": 3,
   "source": "axis",
   "task_definition": {
     "invariants": [],
     "objects": [
       {
-        "asset_id": "assets/part.obj",
+        "asset": {
+          "digest": "5d07dc7004ef4ed96d5d3fc5db6a0f0f6103360c526f1b343ae36c1ccafa960c",
+          "id": "door_compound",
+          "version": "fixture-2"
+        },
+        "asset_pose_in_body": {
+          "position_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
         "body": "door",
+        "body_frame": "door_frame",
+        "collision_geoms": {
+          "handle": "door_handle",
+          "panel": "door_panel"
+        },
+        "free_joint_name": null,
         "id": "door",
-        "symmetry": "none"
+        "motion": "articulated"
       }
     ],
     "observation": "vision",

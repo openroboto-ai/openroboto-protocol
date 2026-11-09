@@ -67,7 +67,7 @@ def test_public_surface_is_pinned_and_json_schema_is_reproducible():
 
 @pytest.mark.parametrize(
     "path,bad",
-    [(("schema_version",), v) for v in (True, 1, 2.0, "2", 3)]
+    [(("schema_version",), v) for v in (True, 1, 2, 3.0, "3", 4)]
     + [
         (("execution_profile", "digest"), "f" * 64),
         (("environment", "id"), "other-simulator"),
@@ -101,7 +101,7 @@ def test_public_surface_is_pinned_and_json_schema_is_reproducible():
         (("scene", "entrypoint"), "unknown.xml"),
         (("public_summary", "execution_profile"), {}),
         (("public_summary", "title"), ""),
-        (("task_definition", "objects", 0, "asset_id"), "unknown.obj"),
+        (("task_definition", "objects", 0, "asset", "id"), "unknown.obj"),
         (("task_definition", "objects", 0, "id"), "robot"),
         (("task_definition", "objects", 0, "id"), "zone_reserved"),
         (("task_definition", "stages", 0, "requires"), ["opened"]),
@@ -226,10 +226,11 @@ def test_observation_resource_and_sensor_contracts_must_match():
 def zone(i=0):
     return {
         "id": f"z{i}",
+        "frame": "world",
         "position": [0.5, 0],
         "radius_m": 0.07,
         "capacity": 1,
-        "accepts": ["assets/part.obj"],
+        "accepts": [task()["task_definition"]["objects"][0]["asset"]],
     }
 
 
@@ -239,9 +240,11 @@ def test_zone_acceptance_and_resource_guards():
     synchronize_checker(value)
     assert SceneTask.model_validate(value)
     for change in (
-        lambda d: d["task_definition"]["zones"][0].update(accepts=["missing.obj"]),
         lambda d: d["task_definition"]["zones"][0].update(
-            accepts=["assets/part.obj"] * 2
+            accepts=[{**zone()["accepts"][0], "id": "missing"}]
+        ),
+        lambda d: d["task_definition"]["zones"][0].update(
+            accepts=zone()["accepts"] * 2
         ),
         lambda d: d["task_definition"]["zones"][0].update(capacity=7),
         lambda d: d["task_definition"].update(zones=[zone()] * 2),
@@ -344,3 +347,210 @@ def test_capability_result_axes_are_separate_and_not_a_local_success_claim():
     ):
         with pytest.raises(ValidationError):
             SceneAdmissionResult.model_validate({**base, **change})
+
+
+def refresh_descriptors(value):
+    """Preserve content identity while testing invalid binding semantics."""
+    from openroboto_protocol.tabletop_assets import canonical_digest
+
+    assets = {}
+    for asset in value["scene"]["assets"]:
+        for section in ("visual", "collision", "physics", "symmetry", "provenance"):
+            part = asset[section]
+            part["digest"] = canonical_digest(
+                {k: v for k, v in part.items() if k != "digest"}
+            )
+        asset["digest"] = canonical_digest(
+            {k: v for k, v in asset.items() if k != "digest"}
+        )
+        assets[asset["id"]] = {k: asset[k] for k in ("id", "version", "digest")}
+    for obj in value["task_definition"]["objects"]:
+        if obj["asset"]["id"] in assets:
+            obj["asset"] = assets[obj["asset"]["id"]]
+    camera = value["scene"]["camera"]
+    camera["digest"] = canonical_digest(
+        {k: v for k, v in camera.items() if k != "digest"}
+    )
+    synchronize_checker(value)
+
+
+@pytest.mark.parametrize(
+    "path,bad",
+    [
+        (("scene", "assets", 0, "collision", "parts", 0, "size"), [1.0, 1.0]),
+        (("scene", "assets", 0, "collision", "parts", 0, "mesh_path"), None),
+        (
+            ("scene", "assets", 0, "collision", "parts", 0, "mesh_path"),
+            "assets/missing.obj",
+        ),
+        (
+            ("scene", "assets", 0, "physics", "contacts", "panel", "friction"),
+            [-1.0, 0.0, 0.0],
+        ),
+        (("scene", "assets", 0, "physics", "contacts"), {}),
+        (
+            ("scene", "assets", 0, "physics", "contacts", "panel", "contact_dimension"),
+            True,
+        ),
+        (
+            ("scene", "assets", 0, "physics", "contacts", "panel", "contact_dimension"),
+            2,
+        ),
+        (("scene", "assets", 0, "physics", "mass_kg"), 0.0),
+        (("scene", "assets", 0, "physics", "inertia_kg_m2"), [0.0] * 6),
+        (("scene", "assets", 0, "symmetry", "category"), "axial_unsigned"),
+        (("scene", "assets", 0, "symmetry", "axis_xyz"), [0.0, 0.0, 1.0]),
+        (("scene", "assets", 0, "symmetry", "rotations_xyzw"), []),
+        (("scene", "assets", 0, "symmetry", "rotations_xyzw"), [[0.0, 0.0, 1.0, 0.0]]),
+        (
+            ("scene", "assets", 0, "symmetry", "rotations_xyzw"),
+            [[0.0, 0.0, 0.0, 1.0]] * 2,
+        ),
+        (("scene", "frames", 0, "parent"), "door_frame"),
+        (("scene", "frames", 0, "parent"), "missing"),
+        (("scene", "frames", 1, "id"), "world"),
+        (("scene", "frames", 1, "parent"), "door_frame"),
+        (("scene", "frames", 1, "parent"), "missing"),
+        (("scene", "joints", 0, "axis_in_child_body"), [0.0, 0.0, 0.0]),
+        (("scene", "joints", 0, "unit"), "m"),
+        (("scene", "joints", 0, "parent_body"), "door"),
+        (("scene", "initial_states", 0, "joints", 0, "position"), 2.0),
+        (("scene", "platform_groups"), []),
+        (("scene", "platform_groups", 0, "collision_geoms"), ["door_panel"]),
+        (("scene", "contact_targets", 0, "id"), "robot"),
+        (("scene", "contact_targets", 0, "entity_id"), "missing"),
+        (("scene", "contact_targets", 0, "geom_names"), ["door_rim_not_handle"]),
+        (("scene", "contact_targets", 0, "geom_names"), ["door_handle", "door_handle"]),
+        (("scene", "camera", "frame"), "missing"),
+        (("scene", "camera", "image_size"), [320, 180]),
+        (("task_definition", "objects", 0, "body_frame"), "missing"),
+        (("task_definition", "objects", 0, "collision_geoms"), {"panel": "door_panel"}),
+        (("task_definition", "objects", 0, "free_joint_name"), "fake_reset"),
+        (("task_definition", "objects", 0, "motion"), "fixed"),
+    ],
+)
+def test_compound_frame_joint_contact_and_camera_bindings_fail_closed(path, bad):
+    value = task()
+    node = value
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = bad
+    refresh_descriptors(value)
+    with pytest.raises(ValidationError):
+        SceneTask.model_validate(value)
+
+
+def test_content_digests_cannot_be_reused_after_descriptor_changes():
+    for section in ("visual", "collision", "physics", "symmetry", "provenance"):
+        value = task()
+        value["scene"]["assets"][0][section]["digest"] = "f" * 64
+        with pytest.raises(ValidationError, match="canonical content"):
+            SceneTask.model_validate(value)
+    value = task()
+    value["scene"]["assets"].append(deepcopy(value["scene"]["assets"][0]))
+    with pytest.raises(ValidationError, match="unique assets/frames"):
+        SceneTask.model_validate(value)
+    value = task()
+    part = value["scene"]["assets"][0]["collision"]["parts"][0]
+    value["scene"]["assets"][0]["collision"]["parts"].append(deepcopy(part))
+    refresh_descriptors(value)
+    with pytest.raises(ValidationError, match="part ids"):
+        SceneTask.model_validate(value)
+    value = task()
+    value["task_definition"]["objects"][0]["asset"]["digest"] = "f" * 64
+    synchronize_checker(value)
+    with pytest.raises(ValidationError, match="exact declared"):
+        SceneTask.model_validate(value)
+
+
+def test_symmetry_groups_are_explicit_and_shared_program_checks_remain_normative():
+    for category, rotations, axis in (
+        ("isotropic", [], None),
+        ("axial_unsigned", [], [0.0, 0.0, 1.0]),
+        ("box", [[0.0, 0.0, 0.0, 1.0]], None),
+    ):
+        value = task()
+        value["scene"]["assets"][0]["symmetry"].update(
+            category=category, rotations_xyzw=rotations, axis_xyz=axis
+        )
+        value["task_definition"]["stages"][0]["goal"] = {
+            "type": "stable",
+            "object_id": "door",
+        }
+        refresh_descriptors(value)
+        assert SceneTask.model_validate(value)
+    for category, axis in (("isotropic", None), ("axial_unsigned", [0.0, 0.0, 1.0])):
+        value = task()
+        value["scene"]["assets"][0]["symmetry"].update(category=category, axis_xyz=axis)
+        refresh_descriptors(value)
+        with pytest.raises(ValidationError, match="Continuous symmetry"):
+            SceneTask.model_validate(value)
+
+
+def test_primitive_and_compound_shape_descriptors_are_not_bbox_aliases():
+    for kind, size in (
+        ("box", [0.02, 0.03, 0.04]),
+        ("sphere", [0.02]),
+        ("cylinder", [0.02, 0.03]),
+        ("capsule", [0.02, 0.03]),
+    ):
+        value = task()
+        for section in ("collision", "visual"):
+            value["scene"]["assets"][0][section]["parts"][0].update(
+                kind=kind, size=size, mesh_path=None
+            )
+        refresh_descriptors(value)
+        assert SceneTask.model_validate(value)
+
+
+def test_free_reset_and_fixed_pose_assertions_do_not_invent_free_joints():
+    for motion, free_joint in (("fixed", None), ("free", "door_free")):
+        value = task()
+        value["task_definition"]["objects"][0].update(
+            motion=motion, free_joint_name=free_joint
+        )
+        value["scene"]["joints"] = []
+        value["scene"]["initial_states"][0]["joints"] = []
+        synchronize_checker(value)
+        assert SceneTask.model_validate(value)
+    value = task()
+    obj = deepcopy(value["task_definition"]["objects"][0])
+    obj.update(
+        id="free_copy",
+        body="copy",
+        body_frame="copy_frame",
+        motion="free",
+        free_joint_name="hinge",
+        collision_geoms={"panel": "copy_panel", "handle": "copy_handle"},
+    )
+    value["task_definition"]["objects"].append(obj)
+    value["scene"]["frames"].append({**value["scene"]["frames"][1], "id": "copy_frame"})
+    synchronize_checker(value)
+    with pytest.raises(ValidationError, match="Free and scalar joint names"):
+        SceneTask.model_validate(value)
+
+
+def test_part_contact_targets_are_explicit_subsets_and_alias_overlap_is_legal():
+    value = task()
+    value["scene"]["contact_targets"].append(
+        {"id": "panel_surface", "entity_id": "door", "geom_names": ["door_panel"]}
+    )
+    value["scene"]["contact_targets"].append(
+        {
+            "id": "whole_surface",
+            "entity_id": "door",
+            "geom_names": ["door_panel", "door_handle"],
+        }
+    )
+    value["task_definition"]["stages"][0]["goal"] = {
+        "type": "no_contact",
+        "object_id": "door",
+        "other_id": "panel_surface",
+    }
+    synchronize_checker(value)
+    assert SceneTask.model_validate(value)
+    value["scene"]["contact_targets"].append(
+        deepcopy(value["scene"]["contact_targets"][0])
+    )
+    with pytest.raises(ValidationError):
+        SceneTask.model_validate(value)

@@ -1,6 +1,168 @@
 {
   "$defs": {
     "JsonValue": {},
+    "_Asset": {
+      "additionalProperties": false,
+      "description": "Compound asset identity includes geometry, physics, symmetry and provenance.",
+      "properties": {
+        "collision": {
+          "$ref": "#/$defs/_Geometry"
+        },
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "physics": {
+          "$ref": "#/$defs/_Physics"
+        },
+        "provenance": {
+          "$ref": "#/$defs/_Provenance"
+        },
+        "symmetry": {
+          "$ref": "#/$defs/_Symmetry"
+        },
+        "version": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Version",
+          "type": "string"
+        },
+        "visual": {
+          "$ref": "#/$defs/_Geometry"
+        }
+      },
+      "required": [
+        "digest",
+        "id",
+        "version",
+        "visual",
+        "collision",
+        "physics",
+        "symmetry",
+        "provenance"
+      ],
+      "title": "_Asset",
+      "type": "object"
+    },
+    "_Camera": {
+      "additionalProperties": false,
+      "description": "Exact render camera and calibration; no state coordinates in vision mode.",
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "frame": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Frame",
+          "type": "string"
+        },
+        "image_size": {
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Image Size",
+          "type": "array"
+        },
+        "name": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Name",
+          "type": "string"
+        },
+        "pose_in_frame": {
+          "$ref": "#/$defs/_Pose"
+        },
+        "vertical_fov_deg": {
+          "exclusiveMaximum": 180,
+          "exclusiveMinimum": 0,
+          "title": "Vertical Fov Deg",
+          "type": "number"
+        }
+      },
+      "required": [
+        "digest",
+        "name",
+        "frame",
+        "pose_in_frame",
+        "vertical_fov_deg",
+        "image_size"
+      ],
+      "title": "_Camera",
+      "type": "object"
+    },
+    "_ContactPhysics": {
+      "additionalProperties": false,
+      "properties": {
+        "contact_dimension": {
+          "maximum": 6,
+          "minimum": 1,
+          "title": "Contact Dimension",
+          "type": "integer"
+        },
+        "friction": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Friction",
+          "type": "array"
+        }
+      },
+      "required": [
+        "friction",
+        "contact_dimension"
+      ],
+      "title": "_ContactPhysics",
+      "type": "object"
+    },
+    "_ContactTarget": {
+      "additionalProperties": false,
+      "description": "Named subset of an entity's geoms; aliases may overlap, ownership may not.",
+      "properties": {
+        "entity_id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "geom_names": {
+          "items": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Geom Names",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "entity_id",
+        "geom_names"
+      ],
+      "title": "_ContactTarget",
+      "type": "object"
+    },
     "_Definition": {
       "additionalProperties": false,
       "properties": {
@@ -158,6 +320,110 @@
       "title": "_ExactRef",
       "type": "object"
     },
+    "_Frame": {
+      "additionalProperties": false,
+      "description": "Reset-reference child origin/axes in its parent; world is implicit identity.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "parent": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Parent",
+          "type": "string"
+        },
+        "pose_in_parent": {
+          "$ref": "#/$defs/_Pose"
+        }
+      },
+      "required": [
+        "id",
+        "parent",
+        "pose_in_parent"
+      ],
+      "title": "_Frame",
+      "type": "object"
+    },
+    "_Geometry": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/_GeometryPart"
+          },
+          "minItems": 1,
+          "title": "Parts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "digest",
+        "parts"
+      ],
+      "title": "_Geometry",
+      "type": "object"
+    },
+    "_GeometryPart": {
+      "additionalProperties": false,
+      "description": "Actual shapes in asset coordinates; sizes follow MuJoCo conventions.\n\nBox: half-extents. Sphere: radius. Cylinder/capsule: radius and straight\nhalf-length (excluding cap radius). Mesh: XYZ scale, plus materialized path.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "box",
+            "sphere",
+            "cylinder",
+            "capsule",
+            "mesh"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "mesh_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Mesh Path"
+        },
+        "pose_in_asset": {
+          "$ref": "#/$defs/_Pose"
+        },
+        "size": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Size",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "size",
+        "mesh_path",
+        "pose_in_asset"
+      ],
+      "title": "_GeometryPart",
+      "type": "object"
+    },
     "_InitialState": {
       "additionalProperties": false,
       "description": "Materialized initial states; every registered state is retained on failure.",
@@ -192,8 +458,17 @@
     },
     "_Joint": {
       "additionalProperties": false,
-      "description": "Bind one scalar hinge/slide to a declared body's imported MuJoCo joint.",
+      "description": "Passive scalar joint identity, checked against the actual compiled model.",
       "properties": {
+        "axis_in_child_body": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Axis In Child Body",
+          "type": "array"
+        },
         "body_id": {
           "pattern": "^[a-z][a-z0-9_]{0,31}$",
           "title": "Body Id",
@@ -218,13 +493,41 @@
           "pattern": "\\S",
           "title": "Name",
           "type": "string"
+        },
+        "parent_body": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Parent Body",
+          "type": "string"
+        },
+        "range": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Range",
+          "type": "array"
+        },
+        "unit": {
+          "enum": [
+            "rad",
+            "m"
+          ],
+          "title": "Unit",
+          "type": "string"
         }
       },
       "required": [
         "id",
         "name",
         "body_id",
-        "kind"
+        "parent_body",
+        "kind",
+        "axis_in_child_body",
+        "range",
+        "unit"
       ],
       "title": "_Joint",
       "type": "object"
@@ -251,11 +554,13 @@
     },
     "_Object": {
       "additionalProperties": false,
-      "description": "Logical checker identity bound to actual geometry, never a proxy cube.",
+      "description": "Explicit geometry ownership on one real body; descendants are never implicit.",
       "properties": {
-        "asset_id": {
-          "title": "Asset Id",
-          "type": "string"
+        "asset": {
+          "$ref": "#/$defs/_ExactRef"
+        },
+        "asset_pose_in_body": {
+          "$ref": "#/$defs/_Pose"
         },
         "body": {
           "maxLength": 1000,
@@ -264,29 +569,61 @@
           "title": "Body",
           "type": "string"
         },
+        "body_frame": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Body Frame",
+          "type": "string"
+        },
+        "collision_geoms": {
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,31}$": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          },
+          "title": "Collision Geoms",
+          "type": "object"
+        },
+        "free_joint_name": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Free Joint Name"
+        },
         "id": {
           "pattern": "^[a-z][a-z0-9_]{0,31}$",
           "title": "Id",
           "type": "string"
         },
-        "symmetry": {
+        "motion": {
           "enum": [
-            "none",
-            "isotropic",
-            "axial_unsigned",
-            "box",
-            "polygon64",
-            "prism"
+            "fixed",
+            "free",
+            "articulated"
           ],
-          "title": "Symmetry",
+          "title": "Motion",
           "type": "string"
         }
       },
       "required": [
         "id",
         "body",
-        "asset_id",
-        "symmetry"
+        "asset",
+        "body_frame",
+        "asset_pose_in_body",
+        "collision_geoms",
+        "motion",
+        "free_joint_name"
       ],
       "title": "_Object",
       "type": "object"
@@ -308,6 +645,97 @@
         "pose"
       ],
       "title": "_ObjectState",
+      "type": "object"
+    },
+    "_Physics": {
+      "additionalProperties": false,
+      "description": "Mass/COM/full inertia in asset frame; contact properties per collision part.",
+      "properties": {
+        "center_of_mass_m": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Center Of Mass M",
+          "type": "array"
+        },
+        "contacts": {
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,31}$": {
+              "$ref": "#/$defs/_ContactPhysics"
+            }
+          },
+          "title": "Contacts",
+          "type": "object"
+        },
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "inertia_kg_m2": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 6,
+          "minItems": 6,
+          "title": "Inertia Kg M2",
+          "type": "array"
+        },
+        "mass_kg": {
+          "minimum": 0,
+          "title": "Mass Kg",
+          "type": "number"
+        }
+      },
+      "required": [
+        "digest",
+        "mass_kg",
+        "center_of_mass_m",
+        "inertia_kg_m2",
+        "contacts"
+      ],
+      "title": "_Physics",
+      "type": "object"
+    },
+    "_PlatformGroup": {
+      "additionalProperties": false,
+      "description": "Exact trusted platform geom groups, never author-overridable target aliases.",
+      "properties": {
+        "body": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Body",
+          "type": "string"
+        },
+        "collision_geoms": {
+          "items": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Collision Geoms",
+          "type": "array"
+        },
+        "id": {
+          "enum": [
+            "table",
+            "robot"
+          ],
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "collision_geoms"
+      ],
+      "title": "_PlatformGroup",
       "type": "object"
     },
     "_Pose": {
@@ -340,6 +768,43 @@
       "title": "_Pose",
       "type": "object"
     },
+    "_Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "license": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "License",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Source",
+          "type": "string"
+        },
+        "source_revision": {
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+          "title": "Source Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest",
+        "source",
+        "source_revision",
+        "license"
+      ],
+      "title": "_Provenance",
+      "type": "object"
+    },
     "_Robot": {
       "additionalProperties": false,
       "description": "Platform robot bytes and tool/control mapping must match the registry.",
@@ -366,6 +831,24 @@
       "additionalProperties": false,
       "description": "A closed DAG of local files; no runtime URL resolution or robot replacement.",
       "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/_Asset"
+          },
+          "minItems": 1,
+          "title": "Assets",
+          "type": "array"
+        },
+        "camera": {
+          "$ref": "#/$defs/_Camera"
+        },
+        "contact_targets": {
+          "items": {
+            "$ref": "#/$defs/_ContactTarget"
+          },
+          "title": "Contact Targets",
+          "type": "array"
+        },
         "coordinates": {
           "const": "right_handed_z_up_xyzw",
           "title": "Coordinates",
@@ -383,6 +866,14 @@
           "title": "Entrypoint",
           "type": "string"
         },
+        "frames": {
+          "items": {
+            "$ref": "#/$defs/_Frame"
+          },
+          "minItems": 1,
+          "title": "Frames",
+          "type": "array"
+        },
         "initial_states": {
           "items": {
             "$ref": "#/$defs/_InitialState"
@@ -398,6 +889,13 @@
           "title": "Joints",
           "type": "array"
         },
+        "platform_groups": {
+          "items": {
+            "$ref": "#/$defs/_PlatformGroup"
+          },
+          "title": "Platform Groups",
+          "type": "array"
+        },
         "units": {
           "const": "metres_radians",
           "title": "Units",
@@ -408,6 +906,11 @@
         "entrypoint",
         "dependencies",
         "joints",
+        "assets",
+        "frames",
+        "platform_groups",
+        "contact_targets",
+        "camera",
         "initial_states",
         "units",
         "coordinates"
@@ -469,13 +972,72 @@
       "title": "_Stage",
       "type": "object"
     },
+    "_Symmetry": {
+      "additionalProperties": false,
+      "description": "Explicit proper rotation group or continuous axis, verified against geometry.",
+      "properties": {
+        "axis_xyz": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Axis Xyz"
+        },
+        "category": {
+          "enum": [
+            "none",
+            "isotropic",
+            "axial_unsigned",
+            "box",
+            "polygon64",
+            "prism"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "rotations_xyzw": {
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
+          },
+          "title": "Rotations Xyzw",
+          "type": "array"
+        }
+      },
+      "required": [
+        "digest",
+        "category",
+        "rotations_xyzw",
+        "axis_xyz"
+      ],
+      "title": "_Symmetry",
+      "type": "object"
+    },
     "_Zone": {
       "additionalProperties": false,
-      "description": "Reuse the composed circular XY zone, capacity and asset acceptance rules.",
+      "description": "World-XY circular zones; capacity is matching assignment, not occupancy.",
       "properties": {
         "accepts": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/_ExactRef"
           },
           "minItems": 1,
           "title": "Accepts",
@@ -485,6 +1047,11 @@
           "minimum": 1,
           "title": "Capacity",
           "type": "integer"
+        },
+        "frame": {
+          "const": "world",
+          "title": "Frame",
+          "type": "string"
         },
         "id": {
           "pattern": "^[a-z][a-z0-9_]{0,31}$",
@@ -509,6 +1076,7 @@
       },
       "required": [
         "id",
+        "frame",
         "position",
         "radius_m",
         "capacity",
@@ -519,7 +1087,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Version-2 task.json for the explicit imported-scene path only.\n\nv1 task.json is parsed by the existing task_contract entrypoint. An unknown\nprofile, extra field, sensor widening or checker substitution fails closed.\nPublic summaries are authored separately, never extracted from private text.",
+  "description": "Version-3 task.json for the explicit imported-scene path only.\n\nv1 task.json is parsed by the existing task_contract entrypoint. An unknown\nprofile, extra field, sensor widening or checker substitution fails closed.\nPublic summaries are authored separately, never extracted from private text.",
   "properties": {
     "checker": {
       "additionalProperties": {
@@ -562,8 +1130,8 @@
       "$ref": "#/$defs/_Scene"
     },
     "schema_version": {
-      "maximum": 2,
-      "minimum": 2,
+      "maximum": 3,
+      "minimum": 3,
       "title": "Schema Version",
       "type": "integer"
     },

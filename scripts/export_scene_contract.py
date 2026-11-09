@@ -75,8 +75,10 @@ def export(root: Path) -> None:
         "scene.xml": (
             b'<mujoco><asset><mesh name="part" file="assets/part.obj"/>'
             b'</asset><worldbody><body name="door">'
-            b'<joint name="hinge" type="hinge"/>'
-            b'<geom type="mesh" mesh="part" mass="1"/>'
+            b'<joint name="hinge" type="hinge" axis="0 0 1" range="0 90"/>'
+            b'<geom name="door_panel" type="mesh" mesh="part" mass="1"/>'
+            b'<geom name="door_handle" type="capsule" size=".006 .02" '
+            b'pos=".03 0 .02"/>'
             b"</body></worldbody></mujoco>\n"
         ),
         "assets/part.obj": (
@@ -100,6 +102,53 @@ def export(root: Path) -> None:
                 "license": "MIT",
             }
         )
+
+    def digested(**value: object) -> dict:
+        return {**value, "digest": canonical_digest(value)}
+
+    parts = [
+        {
+            "id": "panel",
+            "kind": "mesh",
+            "size": [1.0, 1.0, 1.0],
+            "mesh_path": "assets/part.obj",
+            "pose_in_asset": pose,
+        },
+        {
+            "id": "handle",
+            "kind": "capsule",
+            "size": [0.006, 0.02],
+            "mesh_path": None,
+            "pose_in_asset": {
+                "position_m": [0.03, 0.0, 0.02],
+                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+            },
+        },
+    ]
+    asset = digested(
+        id="door_compound",
+        version="fixture-2",
+        visual=digested(parts=parts),
+        collision=digested(parts=parts),
+        physics=digested(
+            mass_kg=1.0,
+            center_of_mass_m=[0.0, 0.0, 0.02],
+            inertia_kg_m2=[0.001, 0.001, 0.001, 0.0, 0.0, 0.0],
+            contacts={
+                p["id"]: {"friction": [0.8, 0.01, 0.001], "contact_dimension": 6}
+                for p in parts
+            },
+        ),
+        symmetry=digested(
+            category="none", rotations_xyzw=[[0.0, 0.0, 0.0, 1.0]], axis_xyz=None
+        ),
+        provenance=digested(
+            source="fixture://ope229/synthetic",
+            source_revision=hashlib.sha256(resources["scene.xml"]).hexdigest(),
+            license="MIT",
+        ),
+    )
+    asset_ref = {k: asset[k] for k in ("id", "version", "digest")}
     definition = {
         "template": "imported_scene",
         "observation": "vision",
@@ -108,8 +157,12 @@ def export(root: Path) -> None:
             {
                 "id": "door",
                 "body": "door",
-                "asset_id": "assets/part.obj",
-                "symmetry": "none",
+                "asset": asset_ref,
+                "body_frame": "door_frame",
+                "asset_pose_in_body": pose,
+                "collision_geoms": {"panel": "door_panel", "handle": "door_handle"},
+                "motion": "articulated",
+                "free_joint_name": None,
             }
         ],
         "zones": [],
@@ -130,7 +183,7 @@ def export(root: Path) -> None:
         ],
     }
     task = {
-        "schema_version": 2,
+        "schema_version": 3,
         "source": "axis",
         "task_id": "synthetic_door",
         "instruction": (
@@ -165,8 +218,39 @@ def export(root: Path) -> None:
                     "name": "hinge",
                     "body_id": "door",
                     "kind": "hinge",
+                    "parent_body": "world",
+                    "axis_in_child_body": [0.0, 0.0, 1.0],
+                    "range": [0.0, 1.5707963267948966],
+                    "unit": "rad",
                 }
             ],
+            "assets": [asset],
+            "frames": [
+                {"id": "scene", "parent": "world", "pose_in_parent": pose},
+                {"id": "door_frame", "parent": "scene", "pose_in_parent": pose},
+            ],
+            "platform_groups": [
+                {"id": "table", "body": "table", "collision_geoms": ["table_surface"]},
+                {
+                    "id": "robot",
+                    "body": "franka",
+                    "collision_geoms": ["franka/fixture_geom"],
+                },
+            ],
+            "contact_targets": [
+                {
+                    "id": "handle_surface",
+                    "entity_id": "door",
+                    "geom_names": ["door_handle"],
+                }
+            ],
+            "camera": digested(
+                name="camera0",
+                frame="world",
+                pose_in_frame=pose,
+                vertical_fov_deg=47.0,
+                image_size=[1280, 720],
+            ),
             "initial_states": [
                 {
                     "id": "first",

@@ -13,7 +13,7 @@ reuses the existing platform manifest identity; it grants no adapter support.
 valid/
   submission.json                  detached joint identity
   execution/
-    task.json                      task schema 2; explicit scene profile
+    task.json                      task schema 3; explicit scene profile
     scene.xml                      -> assets/part.obj
     assets/part.obj                 terminal dependency
   private/
@@ -38,15 +38,87 @@ It must compare robot/environment/control references against its trusted registr
 The package's decompressed actual size, including task.json and stray files, must
 also fit the selected resource guard. A manifest's claimed sizes are not evidence.
 
-`task_definition.objects` binds logical predicate IDs to actual imported body
-names and dependency paths. The asset_id is a path, not a controlled-catalog cube
-alias. All substep, stage, invariant, pose, support/contact, matching and zone
-semantics remain the OPE-227 semantics bound by `profile.json`. Joint IDs bind
-hinge/slide names to logical body IDs; hinge positions are radians, slide positions
-metres. Every initial state names every object and scalar joint exactly once.
-Joint motion is evaluated through existing body predicates; adding a new predicate
-requires OPE-229 coordination and an identity/version change before use.
-The importer must reject inconsistent object-pose and joint-position declarations.
+`task_definition.objects` binds each logical entity to the actual MJCF body,
+an exact `asset={id,version,digest}`, its body_frame, asset_pose_in_body,
+collision_geoms (part ID to exact MJCF geom name), motion and nullable
+free_joint_name. Fixed bodies and fixed children are explicit entities or contact
+subsets; descendants are **never** collected implicitly. Each collision geom has
+one entity/platform owner. A body owns precisely its declared part map; different
+bodies cannot silently share a body frame or a collision geom.
+
+`scene.assets` describes compound visual and collision `parts` separately, with
+part-local transforms. Each part uses actual box/sphere/cylinder/capsule/mesh
+geometry, not a bounding-box alias. Size conventions match MuJoCo: box
+half-extents; sphere radius; cylinder/capsule radius and straight half-length
+excluding cap radius; mesh XYZ scale plus materialized mesh_path. The importer
+must use actual compiled collision hulls/parts, not visual faces or boxes, for
+support/pose/zone geometry. Unsupported mesh/compound semantics must be rejected,
+never approximated without a new identity.
+
+Each asset has separately verified canonical digests for visual geometry,
+collision geometry, physics, symmetry and provenance, then one complete asset
+digest. Every descriptor digest hashes its complete typed JSON excluding only
+its own digest. The asset digest includes all nested digests and values, id and
+version. Physics binds mass, COM in asset axes, full inertia in the order
+Ixx/Iyy/Izz/Ixy/Ixz/Iyz about COM, and friction/contact dimension for every
+collision part. Geometry/physics/source bytes and all other MJCF options remain
+bound by E as well; descriptor comparison is not a substitute for independently
+compiling the actual model. The importer must verify all declared physical and
+symmetry properties against those bytes and compiled data.
+
+Symmetry declares an exact finite rotation set or a continuous isotropic/unsigned
+axial group. Imported asymmetric objects use only the identity rotation; they
+are never assigned a controlled cube group. The existing controlled-v2 catalog,
+geometry digest and proper rotation groups remain unchanged.
+
+`scene.frames` is a reset-reference tree rooted at implicit identity `world`;
+`scene` is a required direct child of world. Transforms place child origins/axes
+in parent coordinates. Body poses in initial_states and measured observations
+are **world body-origin** poses, not geometry origins or COM. Geometry part poses
+are asset-local; asset_pose_in_body maps the asset origin/axes into its body.
+Robot mount is world-relative. Zones explicitly use world XY coordinates, and
+accept exact asset references. Capacity remains matching assignment capacity,
+not a global occupancy invariant.
+
+Every initial state asserts every entity body's world pose and sets every scalar
+joint once. Only `motion=free` has a free_joint_name and receives a free-body pose
+reset. Apply free-body reset, then scalar joint values, then verify **all** body
+pose assertions; fixed/articulated bodies receive no invented freejoint. Initial
+velocities are zero. Joint bindings include id/name/body_id (the child entity),
+actual parent_body, hinge/slide kind, unit axis_in_child_body, increasing range,
+and rad/m unit. Initial values must be in range. The importer checks actual
+compiled names, parent/child topology, DoF, axis, ranges and pose/joint consistency.
+Scene joints are passive and move through real contacts. No author scene actuator
+may widen the existing **nine-dimensional Panda action** mapping; discover and
+reject unauthorized actuators after compilation.
+
+`scene.platform_groups` binds trusted table/robot bodies and exact geom sets;
+the worker must compare these against the registered robot/control/scene identity.
+`scene.contact_targets` names explicit geom subsets of an entity, such as
+socket_bottom distinct from socket_rim. Alias subsets may overlap; geometry
+ownership may not. Existing supported_by/no_contact predicates may reference these
+target IDs through the scene-only optional `validate_program(contact_targets=...)`.
+The default controlled-v2 call and its findings are unchanged. No new joint score
+predicate is introduced.
+
+The scene adapter must normalize observations and the judge from the same entity,
+body, frame and geom map. Keep exact physical geom IDs and a unique physical
+contact identity in internal samples so selecting a target alias does not duplicate
+contact forces or confuse rim/bottom. COM is a separate measured field used for
+support, never substituted for position. Internal diagnostics, contacts/trace and
+reference actions must not leak through unregistered model/tool output.
+
+`scene.camera` binds name, frame, pose_in_frame, vertical_fov_deg, image_size and a
+canonical calibration digest. The actual camera and renderer must match it.
+Resolution is the existing observation contract's 320x180 (state) or 1280x720
+(vision); the allowed sensor list remains exact and vision has no GT coordinates.
+MJCF wxyz conversion is explicit; all contract quaternions are xyzw.
+
+The current scene revision is `panda-open-scene-v1@2.0.0`, task schema 3 and
+execution contract 3. The unpublished 0.16.0/schema-2 draft remains at commit
+`7c2063d` and its original evidence directory; it is not accepted by upgrading
+its version or digest in place. New required fields and semantics have a new
+protocol candidate version and exact profile digest.
 
 ## Identity and private materials
 

@@ -399,12 +399,17 @@ def validate_program(
     zone_ids: set[str],
     max_stages: int,
     max_hold_ticks: int,
+    contact_targets: set[str] | None = None,
 ) -> tuple[ContractIssue, ...]:
     """Share the existing AST and stage checks with imported scene bindings.
 
     Object geometry and physical evaluation belong to the selected adapter. A
     binding supplies actual symmetry, never a surrogate controlled asset id.
-    This validator grants neither runtime support nor reward eligibility.
+    contact_targets only adds explicit imported-scene geom groups; omitting it
+    preserves the controlled-v2 findings, order and semantics. Findings traverse
+    episode invariants first, then stages in list order, with depth-first child
+    predicates. Return a tuple of ContractIssue(code, path, message); never mutate
+    inputs. This validator grants neither runtime support nor reward eligibility.
     """
     issues: list[ContractIssue] = []
 
@@ -498,6 +503,7 @@ def validate_program(
             other = p[field]
             allowed = (
                 set(object_symmetries)
+                | (contact_targets or set())
                 | {"table"}
                 | ({"robot"} if kind == "no_contact" else set())
             )
