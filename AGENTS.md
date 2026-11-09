@@ -157,7 +157,7 @@ from openroboto_protocol import derive_seed  # ❌ no such name at the top level
 ```
 
 Not a style preference — it is how the zero-dependency promise is implemented.
-`schemas.py` is the only module needing pydantic (behind the `[schemas]` extra).
+`schemas.py` and `scene_schema.py` need pydantic (behind the `[schemas]` extra).
 Re-export at the top level and `import openroboto_protocol` drags pydantic in;
 a miner installs this package to derive a seed and should not compile
 pydantic-core on a GPU box.
@@ -167,7 +167,7 @@ Measured: `import openroboto_protocol` 0.24 ms, `openroboto_protocol.schemas` 74
 All 24 real imports across the two consumer repos are the submodule shape and
 **none takes a symbol from the top level** — migration cost is zero.
 
-Consumers pin an exact version (`openroboto-protocol==0.15.0`, the README is
+Consumers pin an exact version (`openroboto-protocol==0.16.0`, the README is
 authoritative). Floating versions and vendored copies are both rejected by consumer
 CI (both checks are quoted in the README under "What consumers must add to their
 own CI", and both already run in `openroboto-backend` and `openroboto-cli`).

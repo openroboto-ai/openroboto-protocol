@@ -20,6 +20,25 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.16.0 — 2026-11-09 (unpublished candidate)
+
+Existing v1/v2 consumers require no migration: released function outputs, package
+hashing, profile digests and default discovery are unchanged. Imported scenes
+require explicit new-path routing and exact operator enablement; installing this
+candidate does not advertise physical or server support.
+
+Adds closed scene task/schema-2 models using the existing `[schemas]` extra,
+explicit execution conditions version 3, materialized asset dependency DAGs,
+Panda/environment/control identity, scalar joint and initial-state bindings.
+Extracts the OPE-227 program checks into additive `validate_program` without
+changing controlled-v2 validation. Detached submission identity binds execution
+and private-reference package roots with no self-reference; role distribution and
+separate capability/admission/reward responses are frozen with synthetic examples
+and exported JSON Schemas. No runtime dependency, package I/O or golden vector
+changes. CLI, worker, backend and web must integrate the same reviewed 0.16.0 wheel
+and schema artifacts under OPE-230–OPE-238; publication and index locks remain
+separate gates. See examples/open_scene/README.md for exact identity and access rules.
+
 ## 0.15.0 — 2026-11-09 (unpublished candidate)
 
 Existing miners and v1 packages require no migration. Released `task_contract`

@@ -5,7 +5,7 @@ miners, the evaluation worker, and the web frontend. Bittensor **netuid 80**.
 
 ## Install
 
-This checkout is the **unpublished 0.15.0 candidate**. For local integration,
+This checkout is the **unpublished 0.16.0 candidate**. For local integration,
 build with `uv build --wheel` and install that exact wheel. The index commands
 below apply after the approved release exists; they are not a claim that the
 candidate is already on PyPI.
@@ -14,9 +14,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.15.0"
+uv add "openroboto-protocol==0.16.0"
 # or
-pip install "openroboto-protocol==0.15.0"
+pip install "openroboto-protocol==0.16.0"
 ```
 
 ```python
@@ -37,7 +37,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.15.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.16.0"   # API and imported-scene schema consumers
 ```
 
 ## Why this package exists
@@ -117,7 +117,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.15.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.16.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
@@ -366,3 +366,48 @@ model discrimination. Build it and record/replay a reference using the separatel
 installed task runtime. `checker_types_for_profile` exposes new checker names
 only for exact supported references; an explicit task checker must match its
 declared goals.
+
+## Imported scenes: explicit development contract (OPE-229)
+
+The unpublished 0.16.0 candidate adds `scene_contract` and `scene_schema`.
+Install the existing `[schemas]` extra to parse imported scenes. Legacy imports,
+`task_contract`, `task_profiles` defaults, directory hashing, and v1/v2 profile
+identities keep their outputs. No unconditional dependency or package I/O is added.
+
+| Path | task schema | Execution conditions | Profile |
+| --- | --- | --- | --- |
+| Existing v1 | 1 | Existing consumer v1 parser | Exact `panda-tabletop-v1` |
+| Controlled OPE-227 candidate | 1 | `composed_execution`, version 2 | Exact `panda-tabletop-v2` |
+| Imported scene candidate | 2 | `scene_contract`, version 3 | Exact `panda-open-scene-v1` |
+
+Consumers of the new path explicitly use
+`scene_contract.validate_task_document` and `scene_schema.SceneTask`; old entrypoints
+are not redirected. Discovery includes scenes only with
+`scene_contract.task_profile_catalog(include_development=True)`. A scene requires
+an exact environment adapter, platform robot artifact and control mapping, local
+file dependency DAG with source revisions/licenses, scalar joint bindings, and
+materialized initial states. Tools, sensors, timing and resource checks reuse
+`composed_execution`; program validation reuses `tabletop_v2.validate_program`.
+No joint-position predicate or alternative checker is introduced. Units are metres
+and radians, in right-handed Z-up world coordinates; quaternions are **xyzw**.
+MJCF's wxyz representation must be converted explicitly by the importer.
+
+[Portable fixtures and the integration contract](examples/open_scene/README.md)
+contain valid/invalid/legacy examples, generated JSON Schemas, role distribution,
+identity vectors and remaining consumer work. JSON Schema describes wire shapes;
+Python model validation is normative for cross-field checks, DAG closure and the
+shared OPE-227 AST. Consumers must not treat a JSON Schema-only pass as admission.
+These examples are synthetic interface data, not physical or server evidence.
+
+Export reproducibly without a simulator or business model:
+
+```bash
+uv run python scripts/export_scene_contract.py --output /tmp/openroboto-scene-contract
+uv run pytest tests/test_scene_contract.py tests/test_scene_schema.py
+```
+
+This freezes a candidate **contract**, not deployed support. Importing real scenes,
+checking actual XML/geometry/robot identity, isolation, authenticated receipts,
+consumer version pins/locks, remote worker attestation and public release remain
+OPE-230–OPE-238 integration gates. Existing consumers must not silently upgrade a
+v1 task or copy new identities into old results.

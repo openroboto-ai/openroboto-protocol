@@ -1,0 +1,600 @@
+{
+  "$defs": {
+    "JsonValue": {},
+    "_Definition": {
+      "additionalProperties": false,
+      "properties": {
+        "invariants": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Invariants",
+          "type": "array"
+        },
+        "objects": {
+          "items": {
+            "$ref": "#/$defs/_Object"
+          },
+          "minItems": 1,
+          "title": "Objects",
+          "type": "array"
+        },
+        "observation": {
+          "enum": [
+            "state",
+            "vision"
+          ],
+          "title": "Observation",
+          "type": "string"
+        },
+        "resource_profile": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Resource Profile",
+          "type": "string"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/_Stage"
+          },
+          "title": "Stages",
+          "type": "array"
+        },
+        "template": {
+          "const": "imported_scene",
+          "title": "Template",
+          "type": "string"
+        },
+        "zones": {
+          "items": {
+            "$ref": "#/$defs/_Zone"
+          },
+          "title": "Zones",
+          "type": "array"
+        }
+      },
+      "required": [
+        "template",
+        "objects",
+        "zones",
+        "stages",
+        "invariants",
+        "observation",
+        "resource_profile"
+      ],
+      "title": "_Definition",
+      "type": "object"
+    },
+    "_Dependency": {
+      "additionalProperties": false,
+      "description": "An already materialized file and its direct package-relative dependencies.",
+      "properties": {
+        "license": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "License",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "source": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Source",
+          "type": "string"
+        },
+        "source_revision": {
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+          "title": "Source Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "requires",
+        "source",
+        "source_revision",
+        "license"
+      ],
+      "title": "_Dependency",
+      "type": "object"
+    },
+    "_ExactRef": {
+      "additionalProperties": false,
+      "description": "One inseparable id/version/content reference; no floating dependency.",
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "digest"
+      ],
+      "title": "_ExactRef",
+      "type": "object"
+    },
+    "_InitialState": {
+      "additionalProperties": false,
+      "description": "Materialized initial states; every registered state is retained on failure.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "joints": {
+          "items": {
+            "$ref": "#/$defs/_JointState"
+          },
+          "title": "Joints",
+          "type": "array"
+        },
+        "objects": {
+          "items": {
+            "$ref": "#/$defs/_ObjectState"
+          },
+          "title": "Objects",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "objects",
+        "joints"
+      ],
+      "title": "_InitialState",
+      "type": "object"
+    },
+    "_Joint": {
+      "additionalProperties": false,
+      "description": "Bind one scalar hinge/slide to a declared body's imported MuJoCo joint.",
+      "properties": {
+        "body_id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Body Id",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "hinge",
+            "slide"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "body_id",
+        "kind"
+      ],
+      "title": "_Joint",
+      "type": "object"
+    },
+    "_JointState": {
+      "additionalProperties": false,
+      "properties": {
+        "joint_id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Joint Id",
+          "type": "string"
+        },
+        "position": {
+          "title": "Position",
+          "type": "number"
+        }
+      },
+      "required": [
+        "joint_id",
+        "position"
+      ],
+      "title": "_JointState",
+      "type": "object"
+    },
+    "_Object": {
+      "additionalProperties": false,
+      "description": "Logical checker identity bound to actual geometry, never a proxy cube.",
+      "properties": {
+        "asset_id": {
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "body": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Body",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "symmetry": {
+          "enum": [
+            "none",
+            "isotropic",
+            "axial_unsigned",
+            "box",
+            "polygon64",
+            "prism"
+          ],
+          "title": "Symmetry",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "asset_id",
+        "symmetry"
+      ],
+      "title": "_Object",
+      "type": "object"
+    },
+    "_ObjectState": {
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Object Id",
+          "type": "string"
+        },
+        "pose": {
+          "$ref": "#/$defs/_Pose"
+        }
+      },
+      "required": [
+        "object_id",
+        "pose"
+      ],
+      "title": "_ObjectState",
+      "type": "object"
+    },
+    "_Pose": {
+      "additionalProperties": false,
+      "description": "World coordinates in metres and an xyzw quaternion; MJCF uses wxyz.",
+      "properties": {
+        "position_m": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "title": "Position M",
+          "type": "array"
+        },
+        "quaternion_xyzw": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Quaternion Xyzw",
+          "type": "array"
+        }
+      },
+      "required": [
+        "position_m",
+        "quaternion_xyzw"
+      ],
+      "title": "_Pose",
+      "type": "object"
+    },
+    "_Robot": {
+      "additionalProperties": false,
+      "description": "Platform robot bytes and tool/control mapping must match the registry.",
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/_ExactRef"
+        },
+        "control_mapping": {
+          "$ref": "#/$defs/_ExactRef"
+        },
+        "mount": {
+          "$ref": "#/$defs/_Pose"
+        }
+      },
+      "required": [
+        "artifact",
+        "control_mapping",
+        "mount"
+      ],
+      "title": "_Robot",
+      "type": "object"
+    },
+    "_Scene": {
+      "additionalProperties": false,
+      "description": "A closed DAG of local files; no runtime URL resolution or robot replacement.",
+      "properties": {
+        "coordinates": {
+          "const": "right_handed_z_up_xyzw",
+          "title": "Coordinates",
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/_Dependency"
+          },
+          "minItems": 1,
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "entrypoint": {
+          "title": "Entrypoint",
+          "type": "string"
+        },
+        "initial_states": {
+          "items": {
+            "$ref": "#/$defs/_InitialState"
+          },
+          "minItems": 1,
+          "title": "Initial States",
+          "type": "array"
+        },
+        "joints": {
+          "items": {
+            "$ref": "#/$defs/_Joint"
+          },
+          "title": "Joints",
+          "type": "array"
+        },
+        "units": {
+          "const": "metres_radians",
+          "title": "Units",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entrypoint",
+        "dependencies",
+        "joints",
+        "initial_states",
+        "units",
+        "coordinates"
+      ],
+      "title": "_Scene",
+      "type": "object"
+    },
+    "_Stage": {
+      "additionalProperties": false,
+      "description": "The OPE-227 AST is validated by validate_program, including early rejection.",
+      "properties": {
+        "goal": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Goal",
+          "type": "object"
+        },
+        "hold_ticks": {
+          "title": "Hold Ticks",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "invariants": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Invariants",
+          "type": "array"
+        },
+        "reject_early": {
+          "title": "Reject Early",
+          "type": "boolean"
+        },
+        "requires": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9_]{0,31}$",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "requires",
+        "goal",
+        "hold_ticks",
+        "invariants",
+        "reject_early"
+      ],
+      "title": "_Stage",
+      "type": "object"
+    },
+    "_Zone": {
+      "additionalProperties": false,
+      "description": "Reuse the composed circular XY zone, capacity and asset acceptance rules.",
+      "properties": {
+        "accepts": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Accepts",
+          "type": "array"
+        },
+        "capacity": {
+          "minimum": 1,
+          "title": "Capacity",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "position": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Position",
+          "type": "array"
+        },
+        "radius_m": {
+          "maximum": 0.2,
+          "minimum": 0.025,
+          "title": "Radius M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "position",
+        "radius_m",
+        "capacity",
+        "accepts"
+      ],
+      "title": "_Zone",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Version-2 task.json for the explicit imported-scene path only.\n\nv1 task.json is parsed by the existing task_contract entrypoint. An unknown\nprofile, extra field, sensor widening or checker substitution fails closed.\nPublic summaries are authored separately, never extracted from private text.",
+  "properties": {
+    "checker": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Checker",
+      "type": "object"
+    },
+    "environment": {
+      "$ref": "#/$defs/_ExactRef"
+    },
+    "execution_contract": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Execution Contract",
+      "type": "object"
+    },
+    "execution_profile": {
+      "$ref": "#/$defs/_ExactRef"
+    },
+    "instruction": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "pattern": "\\S",
+      "title": "Instruction",
+      "type": "string"
+    },
+    "public_summary": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Public Summary",
+      "type": "object"
+    },
+    "robot": {
+      "$ref": "#/$defs/_Robot"
+    },
+    "scene": {
+      "$ref": "#/$defs/_Scene"
+    },
+    "schema_version": {
+      "maximum": 2,
+      "minimum": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "source": {
+      "const": "axis",
+      "title": "Source",
+      "type": "string"
+    },
+    "task_definition": {
+      "$ref": "#/$defs/_Definition"
+    },
+    "task_id": {
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "title": "Task Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "source",
+    "task_id",
+    "instruction",
+    "execution_profile",
+    "environment",
+    "robot",
+    "execution_contract",
+    "public_summary",
+    "scene",
+    "task_definition",
+    "checker"
+  ],
+  "title": "SceneTask",
+  "type": "object"
+}

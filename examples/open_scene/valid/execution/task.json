@@ -1,0 +1,225 @@
+{
+  "checker": {
+    "checker": {
+      "definition": {
+        "invariants": [],
+        "objects": [
+          {
+            "asset_id": "assets/part.obj",
+            "body": "door",
+            "id": "door",
+            "symmetry": "none"
+          }
+        ],
+        "observation": "vision",
+        "resource_profile": "tabletop-standard-v2",
+        "stages": [
+          {
+            "goal": {
+              "object_id": "door",
+              "quaternion": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ],
+              "type": "pose"
+            },
+            "hold_ticks": 500,
+            "id": "opened",
+            "invariants": [],
+            "reject_early": false,
+            "requires": []
+          }
+        ],
+        "template": "imported_scene",
+        "zones": []
+      },
+      "type": "TabletopProgramChecker"
+    }
+  },
+  "environment": {
+    "digest": "3450554ade490f68aed7f1287b3bb93ad42cc24b2e2733ece988c56fe61b8cc7",
+    "id": "panda-mujoco-scene",
+    "version": "fixture-1"
+  },
+  "execution_contract": {
+    "agent": {
+      "harness_commit": "34b7f95c95815c78d101ae7d6371635617dd0679",
+      "system_prompt_digest": "c6c6ca64c5d2e957a7b9edf86cea909d6c44d4e4bc0d7e019bf005dcb431aa9e",
+      "tools_digest": "1f5bd9885976292a458b6953bd2c5b9911148b0b910ff0e90a839c3e14e8b087"
+    },
+    "budget": {
+      "max_api_calls": 12,
+      "max_steps": 500,
+      "wall_seconds": 60.0
+    },
+    "execution_profile": {
+      "digest": "ecc1b4464b67f99f9939bde454451f7dfd0011bd3ac28bb0bacad8c9969af666",
+      "id": "panda-open-scene-v1",
+      "version": "1.0.0"
+    },
+    "harness": {
+      "name": "headless"
+    },
+    "observation_contract": "vision",
+    "permissions": {
+      "allowed_sensors": [
+        "image",
+        "proprioception",
+        "success"
+      ],
+      "mode": "privileged"
+    },
+    "resource_profile": "tabletop-standard-v2",
+    "timing": {
+      "clock_mode": "sim",
+      "control_step_seconds": 0.2,
+      "s": 0.0
+    },
+    "version": 3
+  },
+  "execution_profile": {
+    "digest": "ecc1b4464b67f99f9939bde454451f7dfd0011bd3ac28bb0bacad8c9969af666",
+    "id": "panda-open-scene-v1",
+    "version": "1.0.0"
+  },
+  "instruction": "Interface example only; this is not a physical task or a reference success.",
+  "public_summary": {
+    "execution_profile": {
+      "digest": "ecc1b4464b67f99f9939bde454451f7dfd0011bd3ac28bb0bacad8c9969af666",
+      "id": "panda-open-scene-v1",
+      "version": "1.0.0"
+    },
+    "instruction": "Schema and identity example only.",
+    "origin": "original",
+    "robot": "franka-panda",
+    "title": "Synthetic imported scene"
+  },
+  "robot": {
+    "artifact": {
+      "digest": "2e71806da0effe9069dfb1a615c81c11e3edcac5e4c26fdd921529816d638b26",
+      "id": "franka-panda",
+      "version": "panda-tabletop-v1/1.0.0"
+    },
+    "control_mapping": {
+      "digest": "1f5bd9885976292a458b6953bd2c5b9911148b0b910ff0e90a839c3e14e8b087",
+      "id": "panda-tools",
+      "version": "fixture-1"
+    },
+    "mount": {
+      "position_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  },
+  "scene": {
+    "coordinates": "right_handed_z_up_xyzw",
+    "dependencies": [
+      {
+        "license": "MIT",
+        "path": "scene.xml",
+        "requires": [
+          "assets/part.obj"
+        ],
+        "sha256": "7b9ce7f2a7222b770bd4ee98b37bfa33403ec0b9f641852b375ae05831e20473",
+        "size_bytes": 197,
+        "source": "fixture://ope229/synthetic",
+        "source_revision": "7b9ce7f2a7222b770bd4ee98b37bfa33403ec0b9f641852b375ae05831e20473"
+      },
+      {
+        "license": "MIT",
+        "path": "assets/part.obj",
+        "requires": [],
+        "sha256": "b07299a47802307f1a66dd601184c6113b4e827ea0c1519061768d6fd3024892",
+        "size_bytes": 73,
+        "source": "fixture://ope229/synthetic",
+        "source_revision": "b07299a47802307f1a66dd601184c6113b4e827ea0c1519061768d6fd3024892"
+      }
+    ],
+    "entrypoint": "scene.xml",
+    "initial_states": [
+      {
+        "id": "first",
+        "joints": [
+          {
+            "joint_id": "door_hinge",
+            "position": 0.0
+          }
+        ],
+        "objects": [
+          {
+            "object_id": "door",
+            "pose": {
+              "position_m": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "quaternion_xyzw": [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "joints": [
+      {
+        "body_id": "door",
+        "id": "door_hinge",
+        "kind": "hinge",
+        "name": "hinge"
+      }
+    ],
+    "units": "metres_radians"
+  },
+  "schema_version": 2,
+  "source": "axis",
+  "task_definition": {
+    "invariants": [],
+    "objects": [
+      {
+        "asset_id": "assets/part.obj",
+        "body": "door",
+        "id": "door",
+        "symmetry": "none"
+      }
+    ],
+    "observation": "vision",
+    "resource_profile": "tabletop-standard-v2",
+    "stages": [
+      {
+        "goal": {
+          "object_id": "door",
+          "quaternion": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "type": "pose"
+        },
+        "hold_ticks": 500,
+        "id": "opened",
+        "invariants": [],
+        "reject_early": false,
+        "requires": []
+      }
+    ],
+    "template": "imported_scene",
+    "zones": []
+  },
+  "task_id": "synthetic_door"
+}

@@ -25,6 +25,7 @@ __all__ = [
     "resource_catalog",
     "validate_definition",
     "validate_document",
+    "validate_program",
 ]
 
 _ID = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
@@ -377,6 +378,39 @@ def validate_definition(value: object) -> tuple[ContractIssue, ...]:
                 path + ".accepts",
                 "List unique exact asset ids allowed in this zone.",
             )
+    issues.extend(
+        validate_program(
+            value.get("stages"),
+            value.get("invariants"),
+            object_symmetries={k: v["symmetry"] for k, v in object_assets.items()},
+            zone_ids=zone_ids,
+            max_stages=budget["max_stages"],
+            max_hold_ticks=budget["max_control_steps_per_trial"] * 100,
+        )
+    )
+    return tuple(issues)
+
+
+def validate_program(
+    stages: Any,
+    invariants: Any,
+    *,
+    object_symmetries: Mapping[str, str],
+    zone_ids: set[str],
+    max_stages: int,
+    max_hold_ticks: int,
+) -> tuple[ContractIssue, ...]:
+    """Share the existing AST and stage checks with imported scene bindings.
+
+    Object geometry and physical evaluation belong to the selected adapter. A
+    binding supplies actual symmetry, never a surrogate controlled asset id.
+    This validator grants neither runtime support nor reward eligibility.
+    """
+    issues: list[ContractIssue] = []
+
+    def issue(code: str, path: str, message: str) -> None:
+        issues.append(ContractIssue(code, path, message))
+
     nodes = 0
 
     def predicate(p: Any, path: str, depth: int = 0) -> None:
@@ -419,7 +453,10 @@ def validate_definition(value: object) -> tuple[ContractIssue, ...]:
             predicate(p["child"], path + ".child", depth + 1)
             return
         if kind == "matching":
-            for field, ids in (("object_ids", object_assets), ("zone_ids", zone_ids)):
+            for field, ids in (
+                ("object_ids", object_symmetries),
+                ("zone_ids", zone_ids),
+            ):
                 names = p[field]
                 if (
                     not isinstance(names, list)
@@ -434,7 +471,7 @@ def validate_definition(value: object) -> tuple[ContractIssue, ...]:
                     )
             return
         name = p["object_id"]
-        if not isinstance(name, str) or name not in object_assets:
+        if not isinstance(name, str) or name not in object_symmetries:
             issue("predicate_object", path + ".object_id", "Name a declared object.")
         if kind == "in_zone" and (
             not isinstance(p["zone_id"], str) or p["zone_id"] not in zone_ids
@@ -449,7 +486,7 @@ def validate_definition(value: object) -> tuple[ContractIssue, ...]:
         if (
             kind == "pose"
             and isinstance(name, str)
-            and object_assets.get(name, {}).get("symmetry") == "isotropic"
+            and object_symmetries.get(name) == "isotropic"
         ):
             issue(
                 "pose_unobservable",
@@ -460,7 +497,7 @@ def validate_definition(value: object) -> tuple[ContractIssue, ...]:
             field = "support_id" if kind == "supported_by" else "other_id"
             other = p[field]
             allowed = (
-                set(object_assets)
+                set(object_symmetries)
                 | {"table"}
                 | ({"robot"} if kind == "no_contact" else set())
             )
@@ -478,10 +515,9 @@ def validate_definition(value: object) -> tuple[ContractIssue, ...]:
             for i, p in enumerate(items):
                 predicate(p, f"{path}.{i}")
 
-    predicates(value.get("invariants"), "invariants")
-    stages = value.get("stages")
-    if not isinstance(stages, list) or not 1 <= len(stages) <= budget["max_stages"]:
-        issue("stages_invalid", "stages", f"Supply 1..{budget['max_stages']} stages.")
+    predicates(invariants, "invariants")
+    if not isinstance(stages, list) or not 1 <= len(stages) <= max_stages:
+        issue("stages_invalid", "stages", f"Supply 1..{max_stages} stages.")
         stages = []
     declared: set[str] = set()
     for i, stage in enumerate(stages):
@@ -518,10 +554,7 @@ def validate_definition(value: object) -> tuple[ContractIssue, ...]:
         if isinstance(name, str):
             declared.add(name)
         ticks = stage["hold_ticks"]
-        if (
-            type(ticks) is not int
-            or not 1 <= ticks <= budget["max_control_steps_per_trial"] * 100
-        ):
+        if type(ticks) is not int or not 1 <= ticks <= max_hold_ticks:
             issue(
                 "hold_budget",
                 path + ".hold_ticks",

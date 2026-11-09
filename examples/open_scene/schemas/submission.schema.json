@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "description": "Detached submission.json; identity is checked before any role-based split.",
+  "properties": {
+    "execution_package_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Execution Package Digest",
+      "type": "string"
+    },
+    "private_package_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Private Package Digest",
+      "type": "string"
+    },
+    "schema_version": {
+      "maximum": 1,
+      "minimum": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "submission_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Submission Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "execution_package_digest",
+    "private_package_digest",
+    "submission_digest"
+  ],
+  "title": "SubmissionManifest",
+  "type": "object"
+}

@@ -1,0 +1,90 @@
+{
+  "package_digest": "491bc34b2bd88c37902e31d936e4b2bead0af1d11d8f60f8e6bc5c746c02a49e",
+  "package_files": [
+    [
+      "task.json",
+      "4ce78c33d2d934b0cd4ed43bee3bea311d3abc2865f02b087267a4fd7669bb44"
+    ]
+  ],
+  "profile_catalog": [
+    {
+      "assets": [
+        {
+          "id": "cube-60mm-v1",
+          "mass_kg": 0.08,
+          "size_m": [
+            0.06,
+            0.06,
+            0.06
+          ],
+          "title": "60 mm rigid cube"
+        }
+      ],
+      "authoring_commands": {
+        "build": "openroboto task build --definition task-definition.json --output ./my-task",
+        "create": "openroboto task create task-definition.json",
+        "record_reference": "openroboto task record-reference ./my-task --example",
+        "self_test": "openroboto task self-test ./my-task"
+      },
+      "description": "A fixed-base Panda arm moves one or two rigid cubes into marked target zones, releases them and leaves them still. This is not container containment. Allowed coordinates do not guarantee solvability; reference replay is required.",
+      "execution_profile": {
+        "digest": "f72932959102b72b74812a7ef68339c0ea0116b0211499f1263de025f6821066",
+        "id": "panda-tabletop-v1",
+        "version": "1.0.0"
+      },
+      "id": "panda-tabletop-v1",
+      "limits": {
+        "max_control_steps_per_trial": 500,
+        "max_instances": 20,
+        "max_objects": 2,
+        "max_seed": 2147483647,
+        "min_instances": 1,
+        "minimum_center_separation_m": 0.08,
+        "position_m": {
+          "x": [
+            0.44,
+            0.7
+          ],
+          "y": [
+            -0.1,
+            0.1
+          ],
+          "z": [
+            0.782,
+            0.782
+          ]
+        },
+        "yaw_rad": [
+          0.0,
+          0.0
+        ]
+      },
+      "physics": {
+        "control_period_s": 0.2,
+        "gravity_m_s2": [
+          0.0,
+          0.0,
+          -9.81
+        ],
+        "mujoco_version": "3.17.0"
+      },
+      "robot": "franka-panda",
+      "scene_manifest_sha256": "2e71806da0effe9069dfb1a615c81c11e3edcac5e4c26fdd921529816d638b26",
+      "source": "axis",
+      "success": {
+        "entire_object_inside_zone": true,
+        "finger_open_min_m": 0.035,
+        "hold_control_steps": 5,
+        "max_angular_speed_rad_s": 0.2,
+        "max_linear_speed_m_s": 0.05,
+        "xy_radius_m": 0.07,
+        "z_tolerance_m": 0.01
+      },
+      "templates": [
+        "place_in_zones"
+      ],
+      "title": "Panda tabletop: place objects in target zones",
+      "version": "1.0.0"
+    }
+  ]
+}
