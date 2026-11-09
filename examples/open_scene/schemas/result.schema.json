@@ -1,0 +1,124 @@
+{
+  "$defs": {
+    "_Capability": {
+      "additionalProperties": false,
+      "properties": {
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/_Finding"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "supported",
+            "development",
+            "unsupported",
+            "resource_unavailable",
+            "invalid_package"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "issues"
+      ],
+      "title": "_Capability",
+      "type": "object"
+    },
+    "_Finding": {
+      "additionalProperties": false,
+      "description": "Sanitized diagnostics; raw inputs and private evidence are not public.",
+      "properties": {
+        "code": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "\\S",
+          "title": "Message",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "path",
+        "message"
+      ],
+      "title": "_Finding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Keep capability, physical admission and reward eligibility separate.\n\nSignatures, leases and eligibility policy are caller obligations. This model\nnever rewrites status.py vocabulary or historical v1 results. It does not\ncompute eligibility from scene complexity or a successful local load.",
+  "properties": {
+    "admission": {
+      "enum": [
+        "not_run",
+        "physical_failed",
+        "infra_error",
+        "pending_review",
+        "admitted"
+      ],
+      "title": "Admission",
+      "type": "string"
+    },
+    "capability": {
+      "$ref": "#/$defs/_Capability"
+    },
+    "evidence_digest": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Evidence Digest"
+    },
+    "reward_status": {
+      "enum": [
+        "not_evaluated",
+        "ineligible",
+        "eligible"
+      ],
+      "title": "Reward Status",
+      "type": "string"
+    },
+    "schema_version": {
+      "maximum": 1,
+      "minimum": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "submission_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Submission Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "submission_digest",
+    "capability",
+    "admission",
+    "reward_status",
+    "evidence_digest"
+  ],
+  "title": "SceneAdmissionResult",
+  "type": "object"
+}

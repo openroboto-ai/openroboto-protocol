@@ -1,0 +1,45 @@
+{
+  "additionalProperties": false,
+  "description": "private/reference-binding.json names execution bytes, never its own root.\n\nActions, solutions and raw evidence stay in this private root. A detached\nsigned proof binds SubmissionManifest plus the reference execution contract;\nhashes alone are content identity, not an admission attestation.",
+  "properties": {
+    "execution_contract_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Execution Contract Digest",
+      "type": "string"
+    },
+    "execution_package_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Execution Package Digest",
+      "type": "string"
+    },
+    "reference_files": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Reference Files",
+      "type": "array"
+    },
+    "reference_schema_version": {
+      "maximum": 1,
+      "minimum": 1,
+      "title": "Reference Schema Version",
+      "type": "integer"
+    },
+    "schema_version": {
+      "maximum": 1,
+      "minimum": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schema_version",
+    "execution_package_digest",
+    "execution_contract_digest",
+    "reference_schema_version",
+    "reference_files"
+  ],
+  "title": "PrivateReferenceBinding",
+  "type": "object"
+}

@@ -1,0 +1,5 @@
+{
+  "id": "panda-tools",
+  "purpose": "Interface fixture only; no runnable harness",
+  "version": "fixture-1"
+}

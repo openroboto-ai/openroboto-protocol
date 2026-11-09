@@ -5,7 +5,7 @@ miners, the evaluation worker, and the web frontend. Bittensor **netuid 80**.
 
 ## Install
 
-This checkout is the **unpublished 0.14.0 candidate**. For local integration,
+This checkout is the **unpublished 0.17.0 candidate**. For local integration,
 build with `uv build --wheel` and install that exact wheel. The index commands
 below apply after the approved release exists; they are not a claim that the
 candidate is already on PyPI.
@@ -14,9 +14,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.14.0"
+uv add "openroboto-protocol==0.17.0"
 # or
-pip install "openroboto-protocol==0.14.0"
+pip install "openroboto-protocol==0.17.0"
 ```
 
 ```python
@@ -37,7 +37,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.14.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.17.0"   # API and imported-scene schema consumers
 ```
 
 ## Why this package exists
@@ -59,6 +59,9 @@ copy-paste away from happening.
 | `commitment.py` | Commitment payload encode / decode | Miners write it on chain, backend reads it |
 | `package_digest.py` | Task-package file list and content digest | Miner CLI, admission worker and evaluation layer must compute the same number |
 | `task_contract.py` | Versioned authoring options, explicit public synopsis and reference limits | Authors, backend and workers reject the same unsupported data |
+| `task_profiles.py` | Exact profile dispatch, with development profiles excluded by default | CLI, backend and workers |
+| `composed_execution.py` | Exact v2 reference/agent execution contract normalization, shared by backend and worker | Registration, reference proofs and actual execution |
+| `tabletop_assets.py`, `tabletop_v2.py` | Deterministic geometry, physical asset digests, composed predicates and explicit observation/resource contracts | Candidate authoring tools and physical admission |
 | `model_hash.py` | Model fingerprinting | Both compute it; a mismatch rejects a submission |
 | `model_format.py` | What a submittable checkpoint must contain | Miners export to it, the evaluator rejects against it |
 | `status.py` | Task status and stage vocabulary | Backend, worker and frontend all render it |
@@ -114,13 +117,36 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.14.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.17.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
 records what each version changed **and who has to act on it** — a pinned consumer
 only moves deliberately, so "does this release require anything of me" is the
 question it has to answer first.
+
+## Composed tabletop development profile
+
+`panda-tabletop-v2@2.0.0` is an explicit development candidate. Inspect it with
+`task_profiles.task_profile_catalog(include_development=True)`; the default
+catalog and every function in the released `task_contract` remain v1-compatible.
+Never replace a historical profile digest with the candidate digest.
+
+The catalog freezes ten procedural specifications across eight geometry classes,
+including native spheres/cylinders/capsules and actual convex cone/prism/frustum
+meshes. Geometry, mass, friction, six-dimensional contact settings, symmetry and
+license source are hashed. The candidate fixes MuJoCo 3.17.0 and evaluates true
+shape containment, orientation symmetry, load-bearing support, contact exclusion,
+capacity-aware matching, substep invariants and dependent held stages.
+
+State and vision have separate contracts. Vision hides coordinates, physical
+ground truth and judge internals; it requires an actual camera image. Vision
+freezes 1280 by 720 pixels while state uses 320 by 180; calibration and image
+dimensions are hashed. Increased image cost still needs future budget calibration. Resource
+tiers are development guards, not validated object-count limits or permission to
+spend model calls. This candidate has not passed the full physical robustness,
+visibility, deduplication and remote dev admission matrix. Custom imported scenes,
+custom robots and deformable bodies are not implemented by this profile.
 
 ## What consumers must add to their own CI
 
@@ -340,3 +366,60 @@ model discrimination. Build it and record/replay a reference using the separatel
 installed task runtime. `checker_types_for_profile` exposes new checker names
 only for exact supported references; an explicit task checker must match its
 declared goals.
+
+## Imported scenes: explicit development contract (OPE-229)
+
+The unpublished 0.17.0 candidate adds `scene_contract` and `scene_schema`.
+Install the existing `[schemas]` extra to parse imported scenes. Legacy imports,
+`task_contract`, `task_profiles` defaults, directory hashing, and v1/v2 profile
+identities keep their outputs. No unconditional dependency or package I/O is added.
+
+| Path | task schema | Execution conditions | Profile |
+| --- | --- | --- | --- |
+| Existing v1 | 1 | Existing consumer v1 parser | Exact `panda-tabletop-v1` |
+| Controlled OPE-227 candidate | 1 | `composed_execution`, version 2 | Exact `panda-tabletop-v2` |
+| Imported scene candidate | 3 | `scene_contract`, version 3 | Exact `panda-open-scene-v1` |
+
+Consumers of the new path explicitly use
+`scene_contract.validate_task_document` and `scene_schema.SceneTask`; old entrypoints
+are not redirected. Discovery includes scenes only with
+`scene_contract.task_profile_catalog(include_development=True)`. A scene requires
+an exact environment adapter, platform robot artifact and control mapping, local
+file dependency DAG with source revisions/licenses, scalar joint bindings, and
+materialized initial states. Tools, sensors, timing and resource checks reuse
+`composed_execution`; program validation reuses `tabletop_v2.validate_program`.
+No joint-position predicate or alternative checker is introduced. Units are metres
+and radians, in right-handed Z-up world coordinates; quaternions are **xyzw**.
+MJCF's wxyz representation must be converted explicitly by the importer.
+
+[Portable fixtures and the integration contract](examples/open_scene/README.md)
+contain valid/invalid/legacy examples, generated JSON Schemas, role distribution,
+identity vectors and remaining consumer work. JSON Schema describes wire shapes;
+Python model validation is normative for cross-field checks, DAG closure and the
+shared OPE-227 AST. Consumers must not treat a JSON Schema-only pass as admission.
+These examples are synthetic interface data, not physical or server evidence.
+
+Export reproducibly without a simulator or business model:
+
+```bash
+uv run python scripts/export_scene_contract.py --output /tmp/openroboto-scene-contract
+uv run pytest tests/test_scene_contract.py tests/test_scene_schema.py
+```
+
+This freezes a candidate **contract**, not deployed support. Importing real scenes,
+checking actual XML/geometry/robot identity, isolation, authenticated receipts,
+consumer version pins/locks, remote worker attestation and public release remain
+OPE-230–OPE-238 integration gates. Existing consumers must not silently upgrade a
+v1 task or copy new identities into old results.
+
+
+The 0.17.0 candidate replaces the initial unpublished 0.16.0 scene draft with
+`panda-open-scene-v1@2.0.0`, task schema 3 and execution contract 3. The initial
+schema-2 draft remains reproducible at commit `7c2063d`; it is not silently
+upgraded. The new binding includes compound visual/collision geometry, separate
+physics/provenance/symmetry digests, explicit frames and geom ownership, passive
+joint axis/range/unit, exact support-target subsets and camera calibration.
+Controlled v2 remains unchanged; `validate_program` only gains an optional
+`contact_targets` set for the scene adapter, with identical findings for existing
+callers. Scene actuators are forbidden; only the existing nine-dimensional Panda
+control mapping is allowed. See the fixture README for the complete mapping.
