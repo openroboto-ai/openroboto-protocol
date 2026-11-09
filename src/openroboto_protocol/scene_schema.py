@@ -254,6 +254,30 @@ class _Frame(_Closed):
     pose_in_parent: _Pose
 
 
+def _validate_frame_tree(parents: Mapping[str, str]) -> None:
+    """Verify world ancestry once per node, with no recursion or size limit.
+
+    Unseen nodes are white, the current path is gray, and validated ancestors
+    are black. A node becomes black only after its whole path reaches world or
+    an already validated ancestor. Each parent edge is read at most once, so
+    chains and shared subtrees take O(V + E) work and O(V) auxiliary memory.
+    """
+    validated = {"world"}
+    for frame_id in parents:
+        if frame_id in validated:
+            continue
+        path: list[str] = []
+        visiting: set[str] = set()
+        current = frame_id
+        while current not in validated:
+            if current not in parents or current in visiting:
+                raise ValueError("Frames must form a tree rooted at world")
+            visiting.add(current)
+            path.append(current)
+            current = parents[current]
+        validated.update(path)
+
+
 class _Joint(_Closed):
     """Passive scalar joint identity, checked against the actual compiled model."""
 
@@ -588,14 +612,7 @@ class SceneTask(_Closed):
             raise ValueError(
                 "Declare unique assets/frames with scene and implicit world"
             )
-        for frame in frames.values():
-            seen = {frame.id}
-            parent = frame.parent
-            while parent != "world":
-                if parent not in frames or parent in seen:
-                    raise ValueError("Frames must form a tree rooted at world")
-                seen.add(parent)
-                parent = frames[parent].parent
+        _validate_frame_tree({name: frame.parent for name, frame in frames.items()})
         files = {d.path for d in self.scene.dependencies}
         for asset in assets.values():
             if any(
