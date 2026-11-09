@@ -5,7 +5,7 @@ miners, the evaluation worker, and the web frontend. Bittensor **netuid 80**.
 
 ## Install
 
-This checkout is the **unpublished 0.14.0 candidate**. For local integration,
+This checkout is the **unpublished 0.15.0 candidate**. For local integration,
 build with `uv build --wheel` and install that exact wheel. The index commands
 below apply after the approved release exists; they are not a claim that the
 candidate is already on PyPI.
@@ -14,9 +14,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.14.0"
+uv add "openroboto-protocol==0.15.0"
 # or
-pip install "openroboto-protocol==0.14.0"
+pip install "openroboto-protocol==0.15.0"
 ```
 
 ```python
@@ -37,7 +37,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.14.0"   # backend only
+uv add "openroboto-protocol[schemas]==0.15.0"   # backend only
 ```
 
 ## Why this package exists
@@ -59,6 +59,9 @@ copy-paste away from happening.
 | `commitment.py` | Commitment payload encode / decode | Miners write it on chain, backend reads it |
 | `package_digest.py` | Task-package file list and content digest | Miner CLI, admission worker and evaluation layer must compute the same number |
 | `task_contract.py` | Versioned authoring options, explicit public synopsis and reference limits | Authors, backend and workers reject the same unsupported data |
+| `task_profiles.py` | Exact profile dispatch, with development profiles excluded by default | CLI, backend and workers |
+| `composed_execution.py` | Exact v2 reference/agent execution contract normalization, shared by backend and worker | Registration, reference proofs and actual execution |
+| `tabletop_assets.py`, `tabletop_v2.py` | Deterministic geometry, physical asset digests, composed predicates and explicit observation/resource contracts | Candidate authoring tools and physical admission |
 | `model_hash.py` | Model fingerprinting | Both compute it; a mismatch rejects a submission |
 | `model_format.py` | What a submittable checkpoint must contain | Miners export to it, the evaluator rejects against it |
 | `status.py` | Task status and stage vocabulary | Backend, worker and frontend all render it |
@@ -114,13 +117,36 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.14.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.15.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
 records what each version changed **and who has to act on it** — a pinned consumer
 only moves deliberately, so "does this release require anything of me" is the
 question it has to answer first.
+
+## Composed tabletop development profile
+
+`panda-tabletop-v2@2.0.0` is an explicit development candidate. Inspect it with
+`task_profiles.task_profile_catalog(include_development=True)`; the default
+catalog and every function in the released `task_contract` remain v1-compatible.
+Never replace a historical profile digest with the candidate digest.
+
+The catalog freezes ten procedural specifications across eight geometry classes,
+including native spheres/cylinders/capsules and actual convex cone/prism/frustum
+meshes. Geometry, mass, friction, six-dimensional contact settings, symmetry and
+license source are hashed. The candidate fixes MuJoCo 3.17.0 and evaluates true
+shape containment, orientation symmetry, load-bearing support, contact exclusion,
+capacity-aware matching, substep invariants and dependent held stages.
+
+State and vision have separate contracts. Vision hides coordinates, physical
+ground truth and judge internals; it requires an actual camera image. Vision
+freezes 1280 by 720 pixels while state uses 320 by 180; calibration and image
+dimensions are hashed. Increased image cost still needs future budget calibration. Resource
+tiers are development guards, not validated object-count limits or permission to
+spend model calls. This candidate has not passed the full physical robustness,
+visibility, deduplication and remote dev admission matrix. Custom imported scenes,
+custom robots and deformable bodies are not implemented by this profile.
 
 ## What consumers must add to their own CI
 

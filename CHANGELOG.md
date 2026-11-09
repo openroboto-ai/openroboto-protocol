@@ -20,6 +20,21 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.15.0 — 2026-11-09 (unpublished candidate)
+
+Existing miners and v1 packages require no migration. Released `task_contract`
+functions and their profile digest are unchanged. New consumers must opt into
+`task_profiles` for exact dispatch; development v2 is hidden by default.
+
+Adds a zero-I/O controlled geometric catalog and strict composed-task validation:
+true per-shape geometry/symmetry, contact physics, dependent stages, invariants,
+matching and explicit state/vision/resource contracts. `composed_execution`
+normalizes version-2 execution conditions identically for the backend and worker;
+legacy version-1 parsers and golden digests remain unchanged. Candidate guards do not
+declare validated support or grant execution budgets. CLI, runtime and backend
+must install the same 0.15.0 candidate wheel for local integration; publish and
+regenerate consumer index lockfiles only after release approval.
+
 ## 0.14.0 — 2026-11-07 (candidate)
 
 This checkout is an unpublished candidate. Build a wheel for local integration;
