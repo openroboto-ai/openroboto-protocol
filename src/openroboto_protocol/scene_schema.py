@@ -61,6 +61,16 @@ def _quaternion(value: list[float]) -> list[float]:
 
 
 _Text = Annotated[str, Field(min_length=1, max_length=1000, pattern=r"\S")]
+# Only the model-facing scene instruction has the profile's larger capacity.
+# Identity, provenance and definition text retain their independent limits.
+_SceneInstruction = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=scene_contract.MAX_SCENE_INSTRUCTION_CHARACTERS,
+        pattern=r"\S",
+    ),
+]
 _Id = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,31}$")]
 _Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 _Path = Annotated[str, AfterValidator(_path)]
@@ -463,7 +473,7 @@ class SceneTask(_Closed):
     schema_version: Annotated[int, Field(ge=3, le=3)]
     source: Literal["axis"]
     task_id: _Id
-    instruction: _Text
+    instruction: _SceneInstruction
     execution_profile: _ExactRef
     environment: _ExactRef
     robot: _Robot

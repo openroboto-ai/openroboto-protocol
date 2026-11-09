@@ -27,6 +27,7 @@ def read(name):
 def test_public_surface_is_pinned():
     assert scene.__all__ == [
         "DISTRIBUTION_POLICY",
+        "MAX_SCENE_INSTRUCTION_CHARACTERS",
         "CapabilityResponse",
         "CapabilityStatus",
         "SubmissionIdentity",
