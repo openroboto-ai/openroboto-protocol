@@ -1,0 +1,5 @@
+{
+  "id": "panda-mujoco-scene",
+  "purpose": "Interface fixture only; no registered adapter",
+  "version": "fixture-1"
+}

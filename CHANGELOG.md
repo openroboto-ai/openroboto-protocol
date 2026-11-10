@@ -20,6 +20,94 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.18.0 — 2026-11-10 (unpublished candidate)
+
+Adds an independent 16384-Unicode-code-point limit for `SceneTask.instruction`.
+The shared 1000-character `_Text` limit is unchanged. The exported
+`MAX_SCENE_INSTRUCTION_CHARACTERS` constant and profile `instruction` capability
+share one limit. No normalization, truncation or extra runtime dependency/I/O.
+
+Select `panda-open-scene-v1@2.1.0` with its new digest explicitly; task schema 3
+and execution contract 3 keep their shapes. New readers reject scene 2.0.0 and
+old readers reject 2.1.0. The undeployed 0.17.1 / 2.0.0 checkpoint at `2b3c043`
+and its distributions/evidence are retained, without in-place package/proof/result
+migration. This changed development-profile output is deliberate under the 0.x
+version policy. Released v1/controlled-v2 functions and golden vectors are unchanged.
+
+Robot/assets/physics, roles, package digests, tools/permissions, resource tiers and
+agent budgets retain their rules. The linear frame ancestry check is retained.
+This capacity does not implement or waive instruction consistency. Worker policy
+`scene-instruction-admission/2` still requires the unchanged `scene-program-text/1`
+renderer and all other checks bound into a new trusted config/runtime/environment.
+The old 1000-character policy 1 remains historical. No publication is authorized.
+
+## 0.17.1 — 2026-11-09 (unpublished candidate)
+
+Consumers rebuilding the scene candidate must use this patch's exact wheel;
+0.17.0 remains reproducible at commit `aea37aa`. The task schema, execution
+contract, profile digest, accepted inputs, validation errors and exported JSON
+Schemas are unchanged. Consumer pin/lock updates remain the integration owner's
+responsibility; this candidate is not published.
+
+Fixes quadratic frame ancestry validation with an iterative path walk and a
+cache of validated ancestors. Every parent edge is traversed at most once;
+long chains and shared subtrees now take O(V + E) work. No frame-count limit,
+new dependency, I/O or historical vector changes. Regression tests count parent
+accesses independently of timing and cover long chains, cycles, missing parents,
+shared ancestors and world-rooted branches in both insertion orders.
+
+## 0.17.0 — 2026-11-09 (unpublished candidate)
+
+Existing released v1 and controlled v2 consumers keep identical outputs. Imported
+scene consumers must choose task schema 3 and `panda-open-scene-v1@2.0.0` with its
+new exact digest; the initial unpublished schema-2 draft at commit `7c2063d`
+remains reproducible and is not silently upgraded.
+
+Completes scene bindings for compound visual/collision parts and transforms,
+independent physics/provenance/symmetry digests, exact geom ownership and support
+target subsets, passive scalar joint parent/axis/range/unit, free versus fixed
+reset semantics, world/body/asset frames and calibrated render-camera identity.
+Scene actuators are forbidden and Panda retains its existing nine-dimensional
+action mapping. Adds only the optional `contact_targets` argument to the shared
+program validator; existing v2 code/path/message/order and profile digest remain
+identical. Consumers still need actual compiled-model verification, per-env
+resolvers, isolation, server attestation and approved publication. No runtime
+dependency, I/O, released-function or historical golden-vector changes.
+
+## 0.16.0 — 2026-11-09 (unpublished candidate)
+
+Existing v1/v2 consumers require no migration: released function outputs, package
+hashing, profile digests and default discovery are unchanged. Imported scenes
+require explicit new-path routing and exact operator enablement; installing this
+candidate does not advertise physical or server support.
+
+Adds closed scene task/schema-2 models using the existing `[schemas]` extra,
+explicit execution conditions version 3, materialized asset dependency DAGs,
+Panda/environment/control identity, scalar joint and initial-state bindings.
+Extracts the OPE-227 program checks into additive `validate_program` without
+changing controlled-v2 validation. Detached submission identity binds execution
+and private-reference package roots with no self-reference; role distribution and
+separate capability/admission/reward responses are frozen with synthetic examples
+and exported JSON Schemas. No runtime dependency, package I/O or golden vector
+changes. CLI, worker, backend and web must integrate the same reviewed 0.16.0 wheel
+and schema artifacts under OPE-230–OPE-238; publication and index locks remain
+separate gates. See examples/open_scene/README.md for exact identity and access rules.
+
+## 0.15.0 — 2026-11-09 (unpublished candidate)
+
+Existing miners and v1 packages require no migration. Released `task_contract`
+functions and their profile digest are unchanged. New consumers must opt into
+`task_profiles` for exact dispatch; development v2 is hidden by default.
+
+Adds a zero-I/O controlled geometric catalog and strict composed-task validation:
+true per-shape geometry/symmetry, contact physics, dependent stages, invariants,
+matching and explicit state/vision/resource contracts. `composed_execution`
+normalizes version-2 execution conditions identically for the backend and worker;
+legacy version-1 parsers and golden digests remain unchanged. Candidate guards do not
+declare validated support or grant execution budgets. CLI, runtime and backend
+must install the same 0.15.0 candidate wheel for local integration; publish and
+regenerate consumer index lockfiles only after release approval.
+
 ## 0.14.0 — 2026-11-07 (candidate)
 
 This checkout is an unpublished candidate. Build a wheel for local integration;

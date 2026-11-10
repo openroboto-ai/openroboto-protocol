@@ -1,0 +1,46 @@
+[
+  {
+    "issues": [],
+    "status": "supported"
+  },
+  {
+    "issues": [
+      {
+        "code": "capability_unverified",
+        "message": "The selected adapter is a development candidate.",
+        "path": "execution_profile"
+      }
+    ],
+    "status": "development"
+  },
+  {
+    "issues": [
+      {
+        "code": "environment_unsupported",
+        "message": "No registered adapter matches this environment.",
+        "path": "environment"
+      }
+    ],
+    "status": "unsupported"
+  },
+  {
+    "issues": [
+      {
+        "code": "worker_capacity",
+        "message": "No authorized worker capacity matches this tier.",
+        "path": "resource_profile"
+      }
+    ],
+    "status": "resource_unavailable"
+  },
+  {
+    "issues": [
+      {
+        "code": "dependency_missing",
+        "message": "A required materialized dependency is missing.",
+        "path": "scene.dependencies"
+      }
+    ],
+    "status": "invalid_package"
+  }
+]
