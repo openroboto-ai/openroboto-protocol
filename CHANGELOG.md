@@ -20,6 +20,11 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.20.0
+
+- Add the shared role-free reference-panel definition and signed manifest v2 contract.
+- Keep canonical signing bytes compatible with independent verification of accepted historical originals; new v1 acceptance is deliberately unsupported by the coordinated consumers.
+
 ## 0.19.0 — 2026-11-12 (unpublished candidate)
 
 Gamma submission-fee consumers must pin this candidate together. Existing

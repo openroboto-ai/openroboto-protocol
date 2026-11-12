@@ -14,9 +14,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.19.0"
+uv add "openroboto-protocol==0.20.0"
 # or
-pip install "openroboto-protocol==0.19.0"
+pip install "openroboto-protocol==0.20.0"
 ```
 
 ```python
@@ -37,7 +37,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.19.0"   # API and imported-scene schema consumers
+uv add "openroboto-protocol[schemas]==0.20.0"   # API and imported-scene schema consumers
 ```
 
 ## Why this package exists
@@ -118,7 +118,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.19.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.20.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
@@ -458,3 +458,21 @@ historical. A complete rendering exceeding 16384 characters is still unsupported
 no conditions may be dropped, summarized or replaced by a hash. Runtime/renderer
 implementation and consumer pin/lock updates belong to their owners. This package
 does not invoke a model or grant publication, server admission or reward rights.
+
+
+## Role-free reference panels (0.20.0 candidate)
+
+`openroboto_protocol.reference_panel` defines signed panel manifest **v2**, the
+exact signed field set, canonical signing bytes/hash, and the role-free panel
+shape. A panel contains `members` only; neither a panel nor its members can
+carry a role assignment. Consumers still validate each member's frozen model
+and execution bindings. The module has no runtime dependencies or I/O.
+
+The coordinated backend and worker reject v1 as a **new** report. Accepted
+historical originals keep their original bytes and signatures: canonical
+cryptographic verification deliberately remains version-independent. Read-only
+historical acknowledgement does not authorize new execution or recompute scores.
+
+`fixtures/reference-panel-v2.json` ships in the wheel as the shared synthetic
+config/report/signature vector for consumer contract tests. This protocol change
+does not define or change scoring and settlement formulas.

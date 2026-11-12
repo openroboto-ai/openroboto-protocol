@@ -1,0 +1,115 @@
+{
+  "config": {
+    "panels": {
+      "agent": {
+        "members": [
+          {
+            "harness": "headless",
+            "harness_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "id": "model-a",
+            "kind": "agent",
+            "model": "model-a",
+            "provider": "fixture"
+          },
+          {
+            "harness": "headless",
+            "harness_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "id": "model-b",
+            "kind": "agent",
+            "model": "model-b",
+            "provider": "fixture"
+          }
+        ]
+      }
+    },
+    "settlement_panel": "agent",
+    "trials_per_member": 2,
+    "version": "role-free-fixture/v2"
+  },
+  "config_digest": "19f906d4aff5742ccdc8d6c47734cdb9e57d9bfafc1b92e357896157d3e34578",
+  "manifest": {
+    "algorithm": "ed25519",
+    "config_digest": "19f906d4aff5742ccdc8d6c47734cdb9e57d9bfafc1b92e357896157d3e34578",
+    "config_version": "role-free-fixture/v2",
+    "key_id": "fixture-key",
+    "members": [
+      {
+        "member": "model-a",
+        "member_kind": "agent"
+      },
+      {
+        "member": "model-b",
+        "member_kind": "agent"
+      }
+    ],
+    "node_id": "fixture-node",
+    "package_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "panel": "agent",
+    "run_id": "fixture-run",
+    "settlement": true,
+    "signature": "9c6be7e6fe99cefcce578cdf7c7ce887360f4f06f6dc598026eab121c382f1db32622c9b99e83f579419d5305688319f9ea5292170b83e8b97fae0b407bd4106",
+    "task_id": "fixture-task",
+    "trials_digest": "c16e484b812214c8584a02f14046ae005a7776148d559bb7c576f8c6a1347d5a",
+    "version": 2
+  },
+  "members": [
+    {
+      "member": "model-a",
+      "member_kind": "agent",
+      "trials": [
+        {
+          "child_root": "1111111111111111111111111111111111111111111111111111111111111111",
+          "error": null,
+          "events_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+          "instance": 0,
+          "model_calls": 1,
+          "steps": 10,
+          "success": true,
+          "trial": 0,
+          "wall_ms": 20
+        },
+        {
+          "child_root": "1111111111111111111111111111111111111111111111111111111111111111",
+          "error": null,
+          "events_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+          "instance": 0,
+          "model_calls": 1,
+          "steps": 11,
+          "success": true,
+          "trial": 1,
+          "wall_ms": 21
+        }
+      ]
+    },
+    {
+      "member": "model-b",
+      "member_kind": "agent",
+      "trials": [
+        {
+          "child_root": "2222222222222222222222222222222222222222222222222222222222222222",
+          "error": null,
+          "events_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+          "instance": 0,
+          "model_calls": 1,
+          "steps": 10,
+          "success": false,
+          "trial": 0,
+          "wall_ms": 20
+        },
+        {
+          "child_root": "2222222222222222222222222222222222222222222222222222222222222222",
+          "error": null,
+          "events_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+          "instance": 0,
+          "model_calls": 1,
+          "steps": 11,
+          "success": false,
+          "trial": 1,
+          "wall_ms": 21
+        }
+      ]
+    }
+  ],
+  "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "trials_digest": "c16e484b812214c8584a02f14046ae005a7776148d559bb7c576f8c6a1347d5a"
+}
