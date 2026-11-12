@@ -5,7 +5,7 @@ miners, the evaluation worker, and the web frontend. Bittensor **netuid 80**.
 
 ## Install
 
-This checkout is the **unpublished 0.18.0 candidate**. For local integration,
+This checkout is the **unpublished 0.19.0 candidate**. For local integration,
 build with `uv build --wheel` and install that exact wheel. The index commands
 below apply after the approved release exists; they are not a claim that the
 candidate is already on PyPI.
@@ -14,9 +14,9 @@ Pin the exact version. A floating range means two sides of the subnet can resolv
 to different code, which is the failure this package was created to prevent.
 
 ```bash
-uv add "openroboto-protocol==0.18.0"
+uv add "openroboto-protocol==0.19.0"
 # or
-pip install "openroboto-protocol==0.18.0"
+pip install "openroboto-protocol==0.19.0"
 ```
 
 ```python
@@ -37,7 +37,7 @@ seed and decode a commitment; that must not cost a `pydantic-core` wheel build o
 GPU box. Only `schemas.py` needs pydantic, and only the backend needs `schemas.py`:
 
 ```bash
-uv add "openroboto-protocol[schemas]==0.18.0"   # API and imported-scene schema consumers
+uv add "openroboto-protocol[schemas]==0.19.0"   # API and imported-scene schema consumers
 ```
 
 ## Why this package exists
@@ -57,6 +57,7 @@ copy-paste away from happening.
 | --- | --- | --- |
 | `seed.py` | Seed derivation — block hash + competition id + drand randomness → uint32 | Backend derives it, miners verify it |
 | `commitment.py` | Commitment payload encode / decode | Miners write it on chain, backend reads it |
+| `gamma_payment.py` | Exact Gamma units, task-submission reference and self-spent payment evidence | Miner CLI and backend accept the same payment |
 | `package_digest.py` | Task-package file list and content digest | Miner CLI, admission worker and evaluation layer must compute the same number |
 | `task_contract.py` | Versioned authoring options, explicit public synopsis and reference limits | Authors, backend and workers reject the same unsupported data |
 | `task_profiles.py` | Exact profile dispatch, with development profiles excluded by default | CLI, backend and workers |
@@ -117,7 +118,7 @@ The version number *is* the contract version.
 | `minor` | New optional field. Old data missing the key **must** have a default |
 | `major` | Breaking change. Requires an on-chain data migration plan and review |
 
-Consumers pin an exact version (`openroboto-protocol==0.18.0`). Floating versions are
+Consumers pin an exact version (`openroboto-protocol==0.19.0`). Floating versions are
 rejected in CI, as is any vendored copy of this code.
 
 [`CHANGELOG.md`](https://github.com/openroboto-ai/openroboto-protocol/blob/main/CHANGELOG.md)
@@ -369,7 +370,7 @@ declared goals.
 
 ## Imported scenes: explicit development contract (OPE-229)
 
-The unpublished 0.18.0 candidate provides `scene_contract` and `scene_schema`.
+The unpublished 0.19.0 candidate provides `scene_contract` and `scene_schema`.
 Install the existing `[schemas]` extra to parse imported scenes. Legacy imports,
 `task_contract`, `task_profiles` defaults, directory hashing, and v1/v2 profile
 identities keep their outputs. No unconditional dependency or package I/O is added.

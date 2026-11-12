@@ -1321,6 +1321,10 @@ class SubmissionHistoryItem(Contract):
     #: An array, **not a JSON string** (0002 already converted the column to jsonb).
     env_list: list[str] = Field(default_factory=list)
     burn_amount_tao: float | None = None
+    #: Exact decimal Gamma paid, separate from TAO; absent for older responses.
+    burn_amount_gamma: str | None = None
+    #: The payment method used by this submission, independent of its track.
+    payment_kind: str | None = None
     #: The stored evaluation result, verbatim. `{}` / `""` in the DB are normalized to
     #: `null` at the exit.
     result: ScoreSubmission | None = None
