@@ -20,6 +20,25 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
+## 0.19.0 — 2026-11-12 (unpublished candidate)
+
+Gamma submission-fee consumers must pin this candidate together. Existing
+commitment bytes, TAO payment behavior, scene contracts and golden vectors are
+unchanged. This candidate is not a published index release.
+
+Adds zero-I/O `gamma_payment`: exact positive u64 Gamma-unit conversion, a
+domain-separated SHA-256 reference binding the subnet, competition, hotkey and
+immutable `repo@commit`, and matching of actual `GammaSpent` facts. Payment
+requires the deposit owner and spender to equal the submitting hotkey's owner
+coldkey and the amount to match the quoted fee exactly. A skipped entry or
+extrinsic success alone cannot prove payment. Consumers retain responsibility
+for chain reads, event decoding, transaction recovery and replay prevention.
+
+`SubmissionHistoryItem` adds optional `burn_amount_gamma` (an exact decimal
+string) and `payment_kind`, both defaulting to null when older responses omit
+them. Gamma amounts never occupy the TAO amount field. No runtime dependency,
+I/O or on-chain encoding change is introduced.
+
 ## 0.18.0 — 2026-11-10 (unpublished candidate)
 
 Adds an independent 16384-Unicode-code-point limit for `SceneTask.instruction`.

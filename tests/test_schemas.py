@@ -181,6 +181,8 @@ _RESPONSE_KEYS: dict[type[BaseModel], set[str]] = {
         "eval_status",
         "env_list",
         "burn_amount_tao",
+        "burn_amount_gamma",
+        "payment_kind",
         "result",
         "detail",
         "reject_reason",
@@ -1094,6 +1096,21 @@ def _history_item(**overrides: Any) -> s.SubmissionHistoryItem:
     }
     payload.update(overrides)
     return s.SubmissionHistoryItem.model_validate(payload)
+
+
+def test_older_history_responses_do_not_need_gamma_fields() -> None:
+    item = _history_item(burn_amount_tao=0.125)
+    assert item.burn_amount_tao == 0.125
+    assert item.burn_amount_gamma is None
+    assert item.payment_kind is None
+
+
+def test_gamma_history_keeps_exact_decimal_amount_separate_from_tao() -> None:
+    amount = "18446744073.709551615"
+    item = _history_item(burn_amount_gamma=amount, payment_kind="gamma")
+    assert item.burn_amount_tao is None
+    assert item.model_dump(mode="json")["burn_amount_gamma"] == amount
+    assert item.payment_kind == "gamma"
 
 
 def test_seed_triple_is_null_when_no_seed_was_ever_assigned() -> None:
