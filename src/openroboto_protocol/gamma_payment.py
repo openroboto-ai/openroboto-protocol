@@ -17,7 +17,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Final
+from typing import Final, cast
 
 __all__ = [
     "GAMMA_UNITS_PER_GAMMA",
@@ -50,11 +50,19 @@ def gamma_amount_units(amount: str | int | float) -> int:
         raise ValueError("Gamma amount must be finite and greater than zero")
     if value > _MAX_AMOUNT:
         raise ValueError("Gamma amount exceeds the on-chain u64 range")
-    numerator, denominator = value.as_integer_ratio()
-    units, remainder = divmod(numerator * GAMMA_UNITS_PER_GAMMA, denominator)
-    if remainder:
+    components = value.as_tuple()
+    significant_digits = len(components.digits)
+    while significant_digits > 1 and components.digits[significant_digits - 1] == 0:
+        significant_digits -= 1
+    unit_exponent = (
+        cast(int, components.exponent) + len(components.digits) - significant_digits + 9
+    )
+    if unit_exponent < 0:
         raise ValueError("Gamma amount must be exact to at most nine decimal places")
-    return units
+    coefficient = 0
+    for digit in components.digits[:significant_digits]:
+        coefficient = coefficient * 10 + digit
+    return coefficient * cast(int, 10**unit_exponent)
 
 
 def gamma_payment_reference(
