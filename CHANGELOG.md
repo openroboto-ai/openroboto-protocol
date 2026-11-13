@@ -20,7 +20,16 @@ While the version is `0.x`, compatibility is not promised (README). Entries befo
 0.7.0 are reconstructed from the release commits; if this file and the commit ever
 disagree, the commit is the authority.
 
-## 0.19.0 — 2026-11-12 (unpublished candidate)
+## 0.20.0 — 2026-11-13
+
+Additive: every `0.19.0` import is unchanged. Only consumers that adopt the
+role-free reference panel (signed manifest v2) need to pin `0.20.0`; the backend
+and the worker must switch together because new v1 reports are rejected.
+
+- Add the shared role-free reference-panel definition and signed manifest v2 contract.
+- Keep canonical signing bytes compatible with independent verification of accepted historical originals; new v1 acceptance is deliberately unsupported by the coordinated consumers.
+
+## 0.19.0 — 2026-11-12
 
 Gamma submission-fee consumers must pin this candidate together. Existing
 commitment bytes, TAO payment behavior, scene contracts and golden vectors are
@@ -39,7 +48,7 @@ string) and `payment_kind`, both defaulting to null when older responses omit
 them. Gamma amounts never occupy the TAO amount field. No runtime dependency,
 I/O or on-chain encoding change is introduced.
 
-## 0.18.0 — 2026-11-10 (unpublished candidate)
+## 0.18.0 — 2026-11-10
 
 Adds an independent 16384-Unicode-code-point limit for `SceneTask.instruction`.
 The shared 1000-character `_Text` limit is unchanged. The exported
